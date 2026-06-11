@@ -19,7 +19,7 @@ fun TvNavHost(
 ) {
     NavHost(
         navController = navController,
-        startDestination = Screen.Splash.route
+        startDestination = Screen.Home.route
     ) {
         composable(Screen.Splash.route) {
             SplashScreen(onNavigate = {
