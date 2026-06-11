@@ -1,61 +1,83 @@
 package com.wootv.app.data.remote
 
 import com.wootv.app.data.local.entity.ChannelEntity
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class M3UParser @Inject constructor() {
 
-    fun parse(content: String, playlistId: Long): List<ChannelEntity> {
+    fun parse(file: File, playlistId: Long): List<ChannelEntity> {
         val channels = mutableListOf<ChannelEntity>()
-        val lines = content.lines()
-        var index = 0
-
-        while (index < lines.size) {
-            val line = lines[index].trim()
-            if (line.startsWith("#EXTINF:")) {
-                val metadata = parseExtInf(line)
-                var nextIndex = index + 1
-                var streamUrl: String? = null
-                var extGroupTitle: String? = null
-
-                // Scan forward to find the actual stream URL, skipping other tags and blank lines
-                while (nextIndex < lines.size) {
-                    val nextLine = lines[nextIndex].trim()
-                    if (nextLine.isNotBlank()) {
-                        if (!nextLine.startsWith("#")) {
-                            streamUrl = nextLine
-                            break
-                        } else if (nextLine.startsWith("#EXTGRP:")) {
-                            val group = nextLine.substringAfter("#EXTGRP:").trim()
-                            if (group.isNotEmpty()) {
-                                extGroupTitle = group
+        val maxChannels = 1000 // Limit to 1000 channels to prevent memory issues
+        
+        try {
+            file.bufferedReader().use { reader ->
+                var currentLine: String? = reader.readLine()
+                var nextLine: String? = null
+                
+                while (currentLine != null && channels.size < maxChannels) {
+                    val line = currentLine.trim()
+                    
+                    if (line.startsWith("#EXTINF:")) {
+                        try {
+                            val metadata = parseExtInf(line)
+                            nextLine = reader.readLine()
+                            var streamUrl: String? = null
+                            var extGroupTitle: String? = null
+                            
+                            // Scan forward to find the actual stream URL
+                            while (nextLine != null) {
+                                val nextLineTrimmed = nextLine.trim()
+                                if (nextLineTrimmed.isNotBlank()) {
+                                    if (!nextLineTrimmed.startsWith("#")) {
+                                        streamUrl = nextLineTrimmed
+                                        break
+                                    } else if (nextLineTrimmed.startsWith("#EXTGRP:")) {
+                                        val group = nextLineTrimmed.substringAfter("#EXTGRP:").trim()
+                                        if (group.isNotEmpty()) {
+                                            extGroupTitle = group
+                                        }
+                                    }
+                                }
+                                nextLine = reader.readLine()
                             }
+                            
+                            if (streamUrl != null) {
+                                channels.add(
+                                    ChannelEntity(
+                                        playlistId = playlistId,
+                                        name = metadata.name,
+                                        streamUrl = streamUrl,
+                                        logoUrl = metadata.logoUrl,
+                                        groupTitle = metadata.groupTitle ?: extGroupTitle,
+                                        tvgId = metadata.tvgId,
+                                        tvgName = metadata.tvgName,
+                                        tvgLogo = metadata.tvgLogo
+                                    )
+                                )
+                            }
+                            
+                            // If we found a URL, currentLine becomes nextLine, otherwise read next
+                            if (streamUrl != null) {
+                                currentLine = nextLine
+                            } else {
+                                currentLine = reader.readLine()
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            currentLine = reader.readLine()
                         }
+                    } else {
+                        currentLine = reader.readLine()
                     }
-                    nextIndex++
-                }
-
-                if (streamUrl != null) {
-                    channels.add(
-                        ChannelEntity(
-                            playlistId = playlistId,
-                            name = metadata.name,
-                            streamUrl = streamUrl,
-                            logoUrl = metadata.logoUrl,
-                            groupTitle = metadata.groupTitle ?: extGroupTitle,
-                            tvgId = metadata.tvgId,
-                            tvgName = metadata.tvgName,
-                            tvgLogo = metadata.tvgLogo
-                        )
-                    )
-                    // Advance index to the position of the URL so the outer loop increments correctly
-                    index = nextIndex
                 }
             }
-            index++
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
+        
         return channels
     }
 

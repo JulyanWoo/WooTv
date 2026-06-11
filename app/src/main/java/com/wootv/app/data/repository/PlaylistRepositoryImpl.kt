@@ -46,13 +46,21 @@ class PlaylistRepositoryImpl @Inject constructor(
     }
 
     override suspend fun refreshPlaylist(playlist: Playlist): Int {
-        val content = downloader.download(playlist.url)
-        val channels = m3uParser.parse(content, playlist.id)
+        try {
+            val tempFile = downloader.downloadAsFile(playlist.url)
+            val channels = m3uParser.parse(tempFile, playlist.id)
+            
+            // Delete temp file after parsing
+            tempFile.delete()
 
-        channelDao.deleteByPlaylist(playlist.id)
-        channelDao.insertAll(channels)
-        playlistDao.updateLastRefreshed(playlist.id, System.currentTimeMillis())
+            channelDao.deleteByPlaylist(playlist.id)
+            channelDao.insertAll(channels)
+            playlistDao.updateLastRefreshed(playlist.id, System.currentTimeMillis())
 
-        return channels.size
+            return channels.size
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return 0
+        }
     }
 }

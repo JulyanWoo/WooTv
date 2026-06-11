@@ -287,11 +287,24 @@ private fun ChannelListPanel(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "Cargando canales...",
-                    color = OnSurfaceVariantDark,
-                    fontSize = 14.sp
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "📡",
+                        fontSize = 40.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Cargando canales...",
+                        color = OnSurfaceVariantDark,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Por favor espera...",
+                        color = Blue400,
+                        fontSize = 12.sp
+                    )
+                }
             }
         } else if (channels.isEmpty()) {
             Box(
@@ -309,6 +322,7 @@ private fun ChannelListPanel(
                         color = OnSurfaceVariantDark,
                         fontSize = 14.sp
                     )
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Cargando listas automáticamente...",
                         color = Blue400,
