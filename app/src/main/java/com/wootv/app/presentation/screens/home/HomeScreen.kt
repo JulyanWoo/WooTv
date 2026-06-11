@@ -46,8 +46,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.media3.common.MediaItem
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.tv.material3.Border
@@ -75,7 +73,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.ExoPlayer
+import com.wootv.app.presentation.util.DebugLogger
+import kotlinx.coroutines.delay
 
+@UnstableApi
 @Composable
 fun HomeScreen(
     onChannelClick: (Long) -> Unit,
@@ -91,9 +98,99 @@ fun HomeScreen(
     val selectedCategory by homeViewModel.selectedCategory.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
-    val exoPlayer = remember { ExoPlayer.Builder(context).build() }
+
+    // Configure ExoPlayer with larger buffer for IPTV streams
+    val exoPlayer = remember {
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                15000, // Min buffer ms
+                60000, // Max buffer ms
+                5000,  // Buffer for playback ms
+                10000  // Buffer for rebuffer ms
+            )
+            .build()
+
+        ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
+            .build()
+    }
+
     var focusedChannel by remember { mutableStateOf<Channel?>(null) }
     var activePlaybackChannel by remember { mutableStateOf<Channel?>(null) }
+
+    // region debug-point hp1-player-listener
+    // Add player listener for debugging stream auto-pause issue
+    remember(exoPlayer) {
+        object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                activePlaybackChannel?.let { channel ->
+                    DebugLogger.logPlayerState(
+                        channelName = channel.name,
+                        isPlaying = exoPlayer.isPlaying,
+                        playbackState = playbackState,
+                        bufferedPercentage = exoPlayer.bufferedPercentage
+                    )
+
+                    // Fix: Replay when playback ends (STATE_ENDED = 4)
+                    // This handles IPTV streams that end unexpectedly
+                    if (playbackState == Player.STATE_ENDED) {
+                        DebugLogger.logEvent("playbackEnded", mapOf(
+                            "channel" to channel.name,
+                            "action" to "replaying"
+                        ))
+                        exoPlayer.seekTo(0)
+                        exoPlayer.playWhenReady = true
+                    }
+                }
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                activePlaybackChannel?.let { channel ->
+                    DebugLogger.logEvent("isPlayingChanged", mapOf(
+                        "isPlaying" to isPlaying,
+                        "channel" to channel.name,
+                        "position" to exoPlayer.currentPosition
+                    ))
+                }
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                activePlaybackChannel?.let { channel ->
+                    DebugLogger.logPlayerError(
+                        channelName = channel.name,
+                        errorMessage = error.message ?: "Unknown error",
+                        errorStack = error.stackTrace?.joinToString("\n") ?: "No stack trace"
+                    )
+
+                    // Fix: Retry playback on error
+                    DebugLogger.logEvent("playbackError", mapOf(
+                        "channel" to channel.name,
+                        "action" to "retrying"
+                    ))
+                    exoPlayer.prepare()
+                    exoPlayer.playWhenReady = true
+                }
+            }
+        }
+    }.also { listener ->
+        exoPlayer.addListener(listener)
+    }
+
+    // Periodic buffer status logging
+    LaunchedEffect(activePlaybackChannel) {
+        while (activePlaybackChannel != null) {
+            activePlaybackChannel?.let { channel ->
+                DebugLogger.logBufferStatus(
+                    channelName = channel.name,
+                    bufferedPosition = exoPlayer.bufferedPosition,
+                    bufferedDuration = exoPlayer.bufferedPosition + (exoPlayer.duration * exoPlayer.bufferedPercentage / 100),
+                    totalDuration = exoPlayer.duration
+                )
+            }
+            delay(2000) // Log every 2 seconds
+        }
+    }
+    // endregion
 
     // Auto-play first channel when channels load or change category/playlist
     LaunchedEffect(channels) {

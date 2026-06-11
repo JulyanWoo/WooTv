@@ -42,6 +42,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -56,6 +59,7 @@ import com.wootv.app.domain.model.Channel
 import com.wootv.app.presentation.theme.*
 import com.wootv.app.presentation.viewmodel.ChannelListViewModel
 
+@UnstableApi
 @Composable
 fun ChannelListScreen(
     playlistId: Long,
@@ -66,9 +70,47 @@ fun ChannelListScreen(
     val channels by viewModel.channels.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    val exoPlayer = remember { ExoPlayer.Builder(context).build() }
+    // Configure ExoPlayer with larger buffer for IPTV streams
+    val exoPlayer = remember {
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                15000, // Min buffer ms
+                60000, // Max buffer ms
+                5000,  // Buffer for playback ms
+                10000  // Buffer for rebuffer ms
+            )
+            .build()
+
+        ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
+            .build()
+    }
+
     var focusedChannel by remember { mutableStateOf<Channel?>(null) }
     var activePlaybackChannel by remember { mutableStateOf<Channel?>(null) }
+
+    // Add player listener to handle STATE_ENDED
+    remember(exoPlayer) {
+        object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                // Fix: Replay when playback ends (STATE_ENDED = 4)
+                if (playbackState == Player.STATE_ENDED) {
+                    activePlaybackChannel?.let {
+                        exoPlayer.seekTo(0)
+                        exoPlayer.playWhenReady = true
+                    }
+                }
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                // Fix: Retry playback on error
+                exoPlayer.prepare()
+                exoPlayer.playWhenReady = true
+            }
+        }
+    }.also { listener ->
+        exoPlayer.addListener(listener)
+    }
 
     LaunchedEffect(playlistId) {
         viewModel.loadChannels(playlistId)
