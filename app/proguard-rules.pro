@@ -1,0 +1,5 @@
+-keepattributes *Annotation*
+-keep class com.wootv.app.data.local.entity.** { *; }
+-keep class com.wootv.app.domain.model.** { *; }
+-dontwarn okhttp3.**
+-dontwarn javax.annotation.**
