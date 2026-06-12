@@ -79,6 +79,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import android.view.WindowManager
 import com.wootv.app.presentation.util.DebugLogger
 import kotlinx.coroutines.delay
 
@@ -99,15 +100,16 @@ fun HomeScreen(
 
     val context = LocalContext.current
 
-    // Configure ExoPlayer with larger buffer for IPTV streams
+    // Configure ExoPlayer with large buffer for stable IPTV streaming on Fire TV
     val exoPlayer = remember {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                15000, // Min buffer ms
-                60000, // Max buffer ms
-                5000,  // Buffer for playback ms
-                10000  // Buffer for rebuffer ms
+                30_000,  // Min buffer ms (30s)
+                120_000, // Max buffer ms (120s)
+                5_000,   // Buffer for playback ms
+                15_000   // Buffer for rebuffer ms
             )
+            .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
         ExoPlayer.Builder(context)
@@ -187,10 +189,21 @@ fun HomeScreen(
                     totalDuration = exoPlayer.duration
                 )
             }
-            delay(2000) // Log every 2 seconds
+            delay(30_000) // Log every 30 seconds (reduced to avoid GC pressure on Fire TV)
         }
     }
     // endregion
+
+    // Keep screen on while a channel is actively being previewed
+    val activity = LocalContext.current as? android.app.Activity
+    DisposableEffect(activePlaybackChannel) {
+        if (activePlaybackChannel != null) {
+            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     // Auto-play first channel when channels load or change category/playlist
     LaunchedEffect(channels) {

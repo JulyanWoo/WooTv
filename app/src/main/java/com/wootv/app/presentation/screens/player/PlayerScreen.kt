@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.view.WindowManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -65,15 +66,16 @@ fun PlayerScreen(
     val channel by viewModel.channel.collectAsStateWithLifecycle()
     val currentProgram by viewModel.currentProgram.collectAsStateWithLifecycle()
 
-    // Configure ExoPlayer with larger buffer for IPTV streams
+    // Configure ExoPlayer with large buffer for stable IPTV streaming on Fire TV
     val exoPlayer = remember {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                15000, // Min buffer ms
-                60000, // Max buffer ms
-                5000,  // Buffer for playback ms
-                10000  // Buffer for rebuffer ms
+                30_000,  // Min buffer ms (30s)
+                120_000, // Max buffer ms (120s)
+                5_000,   // Buffer for playback ms
+                15_000   // Buffer for rebuffer ms
             )
+            .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
         ExoPlayer.Builder(context)
@@ -152,10 +154,19 @@ fun PlayerScreen(
                     totalDuration = exoPlayer.duration
                 )
             }
-            delay(2000) // Log every 2 seconds
+            delay(30_000) // Log every 30 seconds (reduced to avoid GC pressure on Fire TV)
         }
     }
     // endregion
+
+    // Keep screen on while playing to prevent Fire TV screensaver
+    val activity = LocalContext.current as? android.app.Activity
+    DisposableEffect(Unit) {
+        activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     LaunchedEffect(channelId) {
         viewModel.loadChannel(channelId)
