@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +46,15 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.wootv.app.presentation.theme.*
 import com.wootv.app.presentation.viewmodel.SearchViewModel
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material3.Icon
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 
 @Composable
 fun SearchScreen(
@@ -55,26 +65,15 @@ fun SearchScreen(
     val query by viewModel.query.collectAsStateWithLifecycle()
     val results by viewModel.results.collectAsStateWithLifecycle()
 
-    // Track whether user has navigated to a channel (survives recomposition)
-    val hasNavigatedToChannel = rememberSaveable { mutableStateOf(false) }
+    // Track the last clicked channel's ID to restore focus when returning (survives recomposition)
+    val lastClickedChannelId = rememberSaveable { mutableStateOf<Long?>(null) }
 
     val textFieldFocusRequester = FocusRequester()
-    val resultsListFocusRequester = FocusRequester()
     val listState = rememberLazyListState()
 
-    // Manage focus: on return from Player with results → focus the results list
-    LaunchedEffect(results) {
-        if (hasNavigatedToChannel.value && results.isNotEmpty()) {
-            try {
-                resultsListFocusRequester.requestFocus()
-            } catch (_: Exception) { }
-            hasNavigatedToChannel.value = false
-        }
-    }
-
-    // Only auto-focus TextField on first entry (no query yet)
+    // Only auto-focus TextField on first entry (no query and not returning from player)
     LaunchedEffect(Unit) {
-        if (query.isBlank() && !hasNavigatedToChannel.value) {
+        if (query.isBlank() && lastClickedChannelId.value == null) {
             try {
                 textFieldFocusRequester.requestFocus()
             } catch (_: Exception) { }
@@ -182,11 +181,21 @@ fun SearchScreen(
             modifier = Modifier
                 .widthIn(max = 800.dp)
                 .fillMaxWidth()
-                .padding(top = 8.dp)
-                .focusRequester(resultsListFocusRequester),
+                .padding(top = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items(results, key = { it.id }) { channel ->
+                val itemFocusRequester = remember { FocusRequester() }
+
+                LaunchedEffect(lastClickedChannelId.value) {
+                    if (lastClickedChannelId.value == channel.id) {
+                        try {
+                            itemFocusRequester.requestFocus()
+                        } catch (_: Exception) {}
+                        lastClickedChannelId.value = null
+                    }
+                }
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -197,10 +206,12 @@ fun SearchScreen(
                     // Channel Play Card
                     Card(
                         onClick = {
-                            hasNavigatedToChannel.value = true
+                            lastClickedChannelId.value = channel.id
                             onChannelClick(channel.id)
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(itemFocusRequester),
                         colors = CardDefaults.colors(containerColor = SurfaceCard),
                         shape = CardDefaults.shape(shape = RoundedCornerShape(10.dp)),
                         scale = CardDefaults.scale(focusedScale = 1.0f),
@@ -212,9 +223,38 @@ fun SearchScreen(
                         )
                     ) {
                         Row(
-                            modifier = Modifier.padding(14.dp),
+                            modifier = Modifier.padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            // Channel logo
+                            val logoUrl = channel.tvgLogo ?: channel.logoUrl
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(SurfaceCardHover),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (logoUrl != null) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(logoUrl)
+                                            .crossfade(true)
+                                            .build(),
+                                        contentDescription = channel.name,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Tv,
+                                        contentDescription = null,
+                                        tint = OnSurfaceVariantDark,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(

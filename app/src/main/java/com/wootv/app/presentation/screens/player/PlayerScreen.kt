@@ -66,6 +66,7 @@ fun PlayerScreen(
     viewModel: PlayerViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val channel by viewModel.channel.collectAsStateWithLifecycle()
     val currentProgram by viewModel.currentProgram.collectAsStateWithLifecycle()
 
@@ -104,12 +105,14 @@ fun PlayerScreen(
                     // Fix: Replay when playback ends (STATE_ENDED = 4)
                     // This handles IPTV streams that end unexpectedly
                     if (playbackState == Player.STATE_ENDED) {
-                        DebugLogger.logEvent("playbackEnded", mapOf(
-                            "channel" to ch.name,
-                            "action" to "replaying"
-                        ))
-                        exoPlayer.seekTo(0)
-                        exoPlayer.playWhenReady = true
+                        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                            DebugLogger.logEvent("playbackEnded", mapOf(
+                                "channel" to ch.name,
+                                "action" to "replaying"
+                            ))
+                            exoPlayer.seekTo(0)
+                            exoPlayer.playWhenReady = true
+                        }
                     }
                 }
             }
@@ -132,13 +135,15 @@ fun PlayerScreen(
                         errorStack = error.stackTrace?.joinToString("\n") ?: "No stack trace"
                     )
 
-                    // Fix: Retry playback on error
-                    DebugLogger.logEvent("playbackError", mapOf(
-                        "channel" to ch.name,
-                        "action" to "retrying"
-                    ))
-                    exoPlayer.prepare()
-                    exoPlayer.playWhenReady = true
+                    // Fix: Retry playback on error only if screen is active/resumed
+                    if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                        DebugLogger.logEvent("playbackError", mapOf(
+                            "channel" to ch.name,
+                            "action" to "retrying"
+                        ))
+                        exoPlayer.prepare()
+                        exoPlayer.playWhenReady = true
+                    }
                 }
             }
         }
@@ -193,7 +198,6 @@ fun PlayerScreen(
     }
 
     // Lifecycle-aware player management: pause/stop when app goes to background
-    val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -204,6 +208,7 @@ fun PlayerScreen(
                     exoPlayer.stop()
                 }
                 Lifecycle.Event.ON_RESUME -> {
+                    exoPlayer.prepare()
                     exoPlayer.playWhenReady = true
                 }
                 else -> { }

@@ -58,6 +58,9 @@ import androidx.tv.material3.Text
 import com.wootv.app.domain.model.Channel
 import com.wootv.app.presentation.theme.*
 import com.wootv.app.presentation.viewmodel.ChannelListViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 @UnstableApi
 @Composable
@@ -69,16 +72,18 @@ fun ChannelListScreen(
 ) {
     val channels by viewModel.channels.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    // Configure ExoPlayer with larger buffer for IPTV streams
+    // Configure ExoPlayer with larger buffer for stable IPTV streaming on Fire TV
     val exoPlayer = remember {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                15000, // Min buffer ms
-                60000, // Max buffer ms
-                5000,  // Buffer for playback ms
-                10000  // Buffer for rebuffer ms
+                30_000,  // Min buffer ms (30s)
+                120_000, // Max buffer ms (120s)
+                5_000,   // Buffer for playback ms
+                15_000   // Buffer for rebuffer ms
             )
+            .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
         ExoPlayer.Builder(context)
@@ -96,16 +101,20 @@ fun ChannelListScreen(
                 // Fix: Replay when playback ends (STATE_ENDED = 4)
                 if (playbackState == Player.STATE_ENDED) {
                     activePlaybackChannel?.let {
-                        exoPlayer.seekTo(0)
-                        exoPlayer.playWhenReady = true
+                        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                            exoPlayer.seekTo(0)
+                            exoPlayer.playWhenReady = true
+                        }
                     }
                 }
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                // Fix: Retry playback on error
-                exoPlayer.prepare()
-                exoPlayer.playWhenReady = true
+                // Fix: Retry playback on error only if screen is active/resumed
+                if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                    exoPlayer.prepare()
+                    exoPlayer.playWhenReady = true
+                }
             }
         }
     }.also { listener ->
@@ -148,8 +157,30 @@ fun ChannelListScreen(
         }
     }
 
-    DisposableEffect(Unit) {
-        onDispose { exoPlayer.release() }
+    // Lifecycle-aware player management: pause/stop when app goes to background
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    exoPlayer.playWhenReady = false
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    exoPlayer.stop()
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    if (activePlaybackChannel != null) {
+                        exoPlayer.prepare()
+                        exoPlayer.playWhenReady = true
+                    }
+                }
+                else -> { }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            exoPlayer.release()
+        }
     }
 
     Column(

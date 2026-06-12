@@ -85,6 +85,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 
 @UnstableApi
 @Composable
@@ -102,6 +104,7 @@ fun HomeScreen(
     val selectedCategory by homeViewModel.selectedCategory.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     // Configure ExoPlayer with large buffer for stable IPTV streaming on Fire TV
     val exoPlayer = remember {
@@ -139,12 +142,14 @@ fun HomeScreen(
                     // Fix: Replay when playback ends (STATE_ENDED = 4)
                     // This handles IPTV streams that end unexpectedly
                     if (playbackState == Player.STATE_ENDED) {
-                        DebugLogger.logEvent("playbackEnded", mapOf(
-                            "channel" to channel.name,
-                            "action" to "replaying"
-                        ))
-                        exoPlayer.seekTo(0)
-                        exoPlayer.playWhenReady = true
+                        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                            DebugLogger.logEvent("playbackEnded", mapOf(
+                                "channel" to channel.name,
+                                "action" to "replaying"
+                            ))
+                            exoPlayer.seekTo(0)
+                            exoPlayer.playWhenReady = true
+                        }
                     }
                 }
             }
@@ -167,13 +172,15 @@ fun HomeScreen(
                         errorStack = error.stackTrace?.joinToString("\n") ?: "No stack trace"
                     )
 
-                    // Fix: Retry playback on error
-                    DebugLogger.logEvent("playbackError", mapOf(
-                        "channel" to channel.name,
-                        "action" to "retrying"
-                    ))
-                    exoPlayer.prepare()
-                    exoPlayer.playWhenReady = true
+                    // Fix: Retry playback on error only if screen is active/resumed
+                    if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                        DebugLogger.logEvent("playbackError", mapOf(
+                            "channel" to channel.name,
+                            "action" to "retrying"
+                        ))
+                        exoPlayer.prepare()
+                        exoPlayer.playWhenReady = true
+                    }
                 }
             }
         }
@@ -245,7 +252,6 @@ fun HomeScreen(
     }
 
     // Lifecycle-aware player management: pause/stop when app goes to background
-    val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -257,6 +263,7 @@ fun HomeScreen(
                 }
                 Lifecycle.Event.ON_RESUME -> {
                     if (activePlaybackChannel != null) {
+                        exoPlayer.prepare()
                         exoPlayer.playWhenReady = true
                     }
                 }
@@ -726,6 +733,7 @@ private fun ChannelListItem(
     onClick: () -> Unit
 ) {
     val bgColor = if (isFocused) SurfaceCardHover else Color.Transparent
+    val logoUrl = channel.tvgLogo ?: channel.logoUrl
 
     Card(
         onClick = onClick,
@@ -744,17 +752,47 @@ private fun ChannelListItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Channel number
             Text(
                 text = "$index",
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
                 color = if (isFocused) Blue400 else OnSurfaceVariantDark,
-                modifier = Modifier.width(28.dp)
+                modifier = Modifier.width(24.dp)
             )
+
+            // Channel logo
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(SurfaceCard),
+                contentAlignment = Alignment.Center
+            ) {
+                if (logoUrl != null) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(logoUrl)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = channel.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Tv,
+                        contentDescription = null,
+                        tint = OnSurfaceVariantDark,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
 
             // Live indicator dot
             if (isFocused) {
@@ -764,7 +802,7 @@ private fun ChannelListItem(
                         .clip(CircleShape)
                         .background(RedLive)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
             }
 
             // Channel info
@@ -772,7 +810,7 @@ private fun ChannelListItem(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = channel.name,
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = if (isFocused) FontWeight.SemiBold else FontWeight.Normal,
                         color = if (isFocused) OnSurfaceDark else OnSurfaceVariantDark,
                         maxLines = 1,
@@ -793,7 +831,7 @@ private fun ChannelListItem(
                 if (group.isNotEmpty()) {
                     Text(
                         text = group,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         color = OnSurfaceVariantDark.copy(alpha = 0.7f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
