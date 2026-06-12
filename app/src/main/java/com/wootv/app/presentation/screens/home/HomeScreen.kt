@@ -59,6 +59,22 @@ import com.wootv.app.R
 import com.wootv.app.domain.model.Channel
 import com.wootv.app.presentation.theme.*
 import com.wootv.app.presentation.viewmodel.HomeViewModel
+import com.wootv.app.presentation.viewmodel.MainCategory
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.TvOff
+import androidx.compose.material3.Icon
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.wrapContentHeight
 
 @Composable
 fun HomeScreen(
@@ -70,16 +86,21 @@ fun HomeScreen(
     val showOnlyFavorites by homeViewModel.showOnlyFavorites.collectAsStateWithLifecycle()
     val isLoading by homeViewModel.isLoading.collectAsStateWithLifecycle()
     val playlistNameMap by homeViewModel.playlistNameMap.collectAsStateWithLifecycle()
+    val playlists by homeViewModel.playlists.collectAsStateWithLifecycle()
+    val selectedPlaylistId by homeViewModel.selectedPlaylistId.collectAsStateWithLifecycle()
+    val selectedCategory by homeViewModel.selectedCategory.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
     val exoPlayer = remember { ExoPlayer.Builder(context).build() }
     var focusedChannel by remember { mutableStateOf<Channel?>(null) }
     var activePlaybackChannel by remember { mutableStateOf<Channel?>(null) }
 
-    // Auto-play first channel when channels load
+    // Auto-play first channel when channels load or change category/playlist
     LaunchedEffect(channels) {
-        if (channels.isNotEmpty() && focusedChannel == null) {
+        if (channels.isNotEmpty()) {
             focusedChannel = channels.first()
+        } else {
+            focusedChannel = null
         }
     }
 
@@ -124,23 +145,30 @@ fun HomeScreen(
             )
     ) {
         // Top Bar
-        TopBar(
+        HomeScreenTopBar(
+            playlists = playlists,
+            selectedPlaylistId = selectedPlaylistId,
+            showOnlyFavorites = showOnlyFavorites,
+            onShowOnlyFavoritesToggle = { homeViewModel.setShowOnlyFavorites(it) },
+            onPlaylistSelect = { homeViewModel.selectPlaylist(it.id) },
             onSearchClick = onSearchClick
         )
 
-        // Group/Category Chips
-        GroupChipRow(
-            showOnlyFavorites = showOnlyFavorites,
-            onShowOnlyFavoritesSelected = { homeViewModel.setShowOnlyFavorites(it) }
-        )
-
-        // Main Content: Channel List + Preview
+        // Main Content: Sidebar + Channel List + Preview
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 32.dp, end = 32.dp, top = 8.dp, bottom = 24.dp)
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp)
         ) {
-            // Left: Channel List (narrower and more modern)
+            // Left Sidebar
+            CategorySidebar(
+                selectedCategory = selectedCategory,
+                onCategorySelect = { homeViewModel.selectCategory(it) }
+            )
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            // Middle: Channel List
             ChannelListPanel(
                 channels = channels,
                 focusedChannel = focusedChannel,
@@ -169,83 +197,282 @@ fun HomeScreen(
 }
 
 @Composable
-private fun TopBar(
-    onSearchClick: () -> Unit
+private fun HomeScreenTopBar(
+    playlists: List<com.wootv.app.domain.model.Playlist>,
+    selectedPlaylistId: Long?,
+    showOnlyFavorites: Boolean,
+    onShowOnlyFavoritesToggle: (Boolean) -> Unit,
+    onPlaylistSelect: (com.wootv.app.domain.model.Playlist) -> Unit,
+    onSearchClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
+    var showPlaylistDialog by remember { mutableStateOf(false) }
+
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .padding(start = 32.dp, end = 32.dp, top = 24.dp, bottom = 8.dp),
+            .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Logo
+        // Left: Logo
         Image(
-            painter = painterResource(id = R.drawable.ic_launcher),
+            painter = painterResource(id = R.drawable.ic_top_logo),
             contentDescription = "WooTv Logo",
             modifier = Modifier.height(36.dp),
             contentScale = ContentScale.Fit
         )
 
-        // Nav Actions
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Right: Horizontal row of Action Cards (Favorites, Playlists, Search)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Favorites Button
+            Card(
+                onClick = { onShowOnlyFavoritesToggle(!showOnlyFavorites) },
+                colors = CardDefaults.colors(
+                    containerColor = if (showOnlyFavorites) Blue500 else SurfaceCard,
+                    focusedContainerColor = SurfaceCardHover
+                ),
+                shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp)),
+                border = CardDefaults.border(
+                    focusedBorder = Border(
+                        border = BorderStroke(1.dp, FocusBorder),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = if (showOnlyFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = "Favoritos",
+                        tint = if (showOnlyFavorites) Color.White else OnSurfaceVariantDark,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Favoritos",
+                        fontSize = 13.sp,
+                        color = if (showOnlyFavorites) Color.White else OnSurfaceVariantDark
+                    )
+                }
+            }
+
+            // Playlist Switcher Button
+            Card(
+                onClick = { showPlaylistDialog = true },
+                colors = CardDefaults.colors(
+                    containerColor = SurfaceCard,
+                    focusedContainerColor = SurfaceCardHover
+                ),
+                shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp)),
+                border = CardDefaults.border(
+                    focusedBorder = Border(
+                        border = BorderStroke(1.dp, FocusBorder),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.List,
+                        contentDescription = "Listas",
+                        tint = OnSurfaceVariantDark,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Listas",
+                        fontSize = 13.sp,
+                        color = OnSurfaceVariantDark
+                    )
+                }
+            }
+
+            // Search Button
             Card(
                 onClick = onSearchClick,
-                colors = CardDefaults.colors(containerColor = SurfaceCard),
-                shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp))
-            ) {
-                Text(
-                    text = "🔍 Buscar",
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    color = OnSurfaceVariantDark,
-                    fontSize = 14.sp
+                colors = CardDefaults.colors(
+                    containerColor = SurfaceCard,
+                    focusedContainerColor = SurfaceCardHover
+                ),
+                shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp)),
+                border = CardDefaults.border(
+                    focusedBorder = Border(
+                        border = BorderStroke(1.dp, FocusBorder),
+                        shape = RoundedCornerShape(8.dp)
+                    )
                 )
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Buscar",
+                        tint = OnSurfaceVariantDark,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Buscar",
+                        fontSize = 13.sp,
+                        color = OnSurfaceVariantDark
+                    )
+                }
+            }
+        }
+    }
+
+    // Modal Dialog for Playlist Switcher
+    if (showPlaylistDialog) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showPlaylistDialog = false }
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(360.dp)
+                    .wrapContentHeight()
+                    .padding(16.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceCard)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp)
+                ) {
+                    Text(
+                        text = "Seleccionar Lista",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = OnSurfaceDark,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    
+                    LazyColumn(
+                        modifier = Modifier.wrapContentHeight(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(playlists) { playlist ->
+                            val isSelected = playlist.id == selectedPlaylistId
+                            Card(
+                                onClick = {
+                                    onPlaylistSelect(playlist)
+                                    showPlaylistDialog = false
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.colors(
+                                    containerColor = if (isSelected) Blue500 else SurfaceCardHover,
+                                    focusedContainerColor = SurfaceCardHover
+                                ),
+                                shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp)),
+                                border = CardDefaults.border(
+                                    focusedBorder = Border(
+                                        border = BorderStroke(1.dp, FocusBorder),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = playlist.name,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (isSelected) Color.White else OnSurfaceVariantDark
+                                    )
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun GroupChipRow(
-    showOnlyFavorites: Boolean,
-    onShowOnlyFavoritesSelected: (Boolean) -> Unit
+private fun CategorySidebar(
+    selectedCategory: MainCategory,
+    onCategorySelect: (MainCategory) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 32.dp, end = 32.dp, top = 4.dp, bottom = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    Column(
+        modifier = modifier
+            .width(80.dp)
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(16.dp))
+            .background(SurfaceCard)
+            .padding(vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Todos Chip
-        Card(
-            onClick = { onShowOnlyFavoritesSelected(false) },
-            colors = CardDefaults.colors(
-                containerColor = if (!showOnlyFavorites) Blue500 else SurfaceCard
-            ),
-            shape = CardDefaults.shape(shape = RoundedCornerShape(20.dp))
-        ) {
-            Text(
-                text = "📺 Todos los Canales",
-                fontSize = 13.sp,
-                color = if (!showOnlyFavorites) Color.White else OnSurfaceVariantDark,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-            )
-        }
+        val categories = listOf(
+            Triple(MainCategory.TV, Icons.Default.Tv, "TV"),
+            Triple(MainCategory.MOVIES, Icons.Default.Movie, "Cine"),
+            Triple(MainCategory.SERIES, Icons.Default.VideoLibrary, "Series"),
+            Triple(MainCategory.ANIME, Icons.Default.AutoAwesome, "Anime")
+        )
 
-        // Favoritos Chip
-        Card(
-            onClick = { onShowOnlyFavoritesSelected(true) },
-            colors = CardDefaults.colors(
-                containerColor = if (showOnlyFavorites) Blue500 else SurfaceCard
-            ),
-            shape = CardDefaults.shape(shape = RoundedCornerShape(20.dp))
-        ) {
-            Text(
-                text = "❤️ Mis Favoritos",
-                fontSize = 13.sp,
-                color = if (showOnlyFavorites) Color.White else OnSurfaceVariantDark,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-            )
+        categories.forEach { (category, icon, label) ->
+            val isSelected = selectedCategory == category
+            
+            Card(
+                onClick = { onCategorySelect(category) },
+                modifier = Modifier
+                    .size(64.dp),
+                colors = CardDefaults.colors(
+                    containerColor = if (isSelected) Blue500 else Color.Transparent,
+                    focusedContainerColor = SurfaceCardHover,
+                    pressedContainerColor = Blue600
+                ),
+                shape = CardDefaults.shape(shape = RoundedCornerShape(12.dp)),
+                border = CardDefaults.border(
+                    focusedBorder = Border(
+                        border = BorderStroke(1.dp, FocusBorder),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                )
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = label,
+                        tint = if (isSelected) Color.White else OnSurfaceVariantDark,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = label,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isSelected) Color.White else OnSurfaceVariantDark
+                    )
+                }
+            }
         }
     }
 }
@@ -288,11 +515,11 @@ private fun ChannelListPanel(
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "📡",
-                        fontSize = 40.sp
+                    CircularProgressIndicator(
+                        color = Blue400,
+                        modifier = Modifier.size(36.dp)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "Cargando canales...",
                         color = OnSurfaceVariantDark,
@@ -312,11 +539,13 @@ private fun ChannelListPanel(
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "📡",
-                        fontSize = 40.sp
+                    Icon(
+                        imageVector = Icons.Default.TvOff,
+                        contentDescription = null,
+                        tint = OnSurfaceVariantDark,
+                        modifier = Modifier.size(48.dp)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "No hay canales",
                         color = OnSurfaceVariantDark,
@@ -324,7 +553,7 @@ private fun ChannelListPanel(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Cargando listas automáticamente...",
+                        text = "Selecciona otra categoría o lista...",
                         color = Blue400,
                         fontSize = 12.sp
                     )
@@ -417,9 +646,11 @@ private fun ChannelListItem(
                     )
                     if (channel.isFavorite) {
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "❤️",
-                            fontSize = 11.sp
+                        Icon(
+                            imageVector = Icons.Default.Favorite,
+                            contentDescription = null,
+                            tint = RedLive,
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 }
@@ -522,16 +753,30 @@ private fun PreviewPanel(
                         Card(
                             onClick = { onToggleFavorite(activeChannel.id, !isFavorite) },
                             colors = CardDefaults.colors(
-                                containerColor = if (isFavorite) RedLive else SurfaceCard
+                                containerColor = if (isFavorite) RedLive else SurfaceCard,
+                                focusedContainerColor = SurfaceCardHover
                             ),
-                            shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp))
+                            shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp)),
+                            border = CardDefaults.border(
+                                focusedBorder = Border(
+                                    border = BorderStroke(1.dp, FocusBorder),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                            )
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                Icon(
+                                    imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = if (isFavorite) "❤️ Quitar de Favoritos" else "🤍 Agregar a Favoritos",
+                                    text = if (isFavorite) "Quitar de Favoritos" else "Agregar a Favoritos",
                                     fontSize = 12.sp,
                                     color = Color.White,
                                     fontWeight = FontWeight.Medium
@@ -546,9 +791,11 @@ private fun PreviewPanel(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Text(
-                        text = "📺",
-                        fontSize = 56.sp
+                    Icon(
+                        imageVector = Icons.Default.Tv,
+                        contentDescription = null,
+                        tint = OnSurfaceVariantDark,
+                        modifier = Modifier.size(64.dp)
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(

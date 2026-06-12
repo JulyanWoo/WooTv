@@ -21,6 +21,13 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+enum class MainCategory {
+    TV,
+    MOVIES,
+    SERIES,
+    ANIME
+}
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val getPlaylistsUseCase: GetPlaylistsUseCase,
@@ -37,6 +44,12 @@ class HomeViewModel @Inject constructor(
         .map { list -> list.associate { it.id to it.name } }
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyMap())
 
+    private val _selectedPlaylistId = MutableStateFlow<Long?>(null)
+    val selectedPlaylistId: StateFlow<Long?> = _selectedPlaylistId
+
+    private val _selectedCategory = MutableStateFlow(MainCategory.TV)
+    val selectedCategory: StateFlow<MainCategory> = _selectedCategory
+
     private val _showOnlyFavorites = MutableStateFlow(false)
     val showOnlyFavorites: StateFlow<Boolean> = _showOnlyFavorites
 
@@ -45,16 +58,66 @@ class HomeViewModel @Inject constructor(
 
     val filteredChannels: StateFlow<List<Channel>> = combine(
         _allChannels,
+        _selectedCategory,
         _showOnlyFavorites
-    ) { channels, showOnlyFavs ->
-        val tvChannels = channels.filter { channel ->
-            // Filter out "-- VIX --" (series/movies) and show only TV channels
-            channel.groupTitle != "-- VIX --"
+    ) { channels, category, showOnlyFavs ->
+        val categoryChannels = channels.filter { channel ->
+            val group = channel.groupTitle ?: ""
+            when (category) {
+                MainCategory.ANIME -> {
+                    group.contains("anime", ignoreCase = true)
+                }
+                MainCategory.MOVIES -> {
+                    (group.contains("cine", ignoreCase = true) || 
+                     group.contains("movie", ignoreCase = true) || 
+                     group.contains("cinema", ignoreCase = true) || 
+                     group.contains("pelicula", ignoreCase = true) || 
+                     group.contains("película", ignoreCase = true) || 
+                     group.contains("estrenos", ignoreCase = true) || 
+                     group.contains("sagas", ignoreCase = true)) && 
+                    !group.contains("anime", ignoreCase = true) && 
+                    !group.contains("series", ignoreCase = true) && 
+                    !group.contains("season", ignoreCase = true) && 
+                    !group.contains("temporada", ignoreCase = true)
+                }
+                MainCategory.SERIES -> {
+                    (group.contains("series", ignoreCase = true) || 
+                     group.contains("vix", ignoreCase = true) || 
+                     group.contains("season", ignoreCase = true) || 
+                     group.contains("temporada", ignoreCase = true) || 
+                     group.contains("serie", ignoreCase = true) || 
+                     group.contains("reality", ignoreCase = true)) && 
+                    !group.contains("anime", ignoreCase = true)
+                }
+                MainCategory.TV -> {
+                    val isAnime = group.contains("anime", ignoreCase = true)
+                    val isMovie = (group.contains("cine", ignoreCase = true) || 
+                                   group.contains("movie", ignoreCase = true) || 
+                                   group.contains("cinema", ignoreCase = true) || 
+                                   group.contains("pelicula", ignoreCase = true) || 
+                                   group.contains("película", ignoreCase = true) || 
+                                   group.contains("estrenos", ignoreCase = true) || 
+                                   group.contains("sagas", ignoreCase = true)) && 
+                                  !group.contains("anime", ignoreCase = true) && 
+                                  !group.contains("series", ignoreCase = true) && 
+                                  !group.contains("season", ignoreCase = true) && 
+                                  !group.contains("temporada", ignoreCase = true)
+                    val isSeries = (group.contains("series", ignoreCase = true) || 
+                                    group.contains("vix", ignoreCase = true) || 
+                                    group.contains("season", ignoreCase = true) || 
+                                    group.contains("temporada", ignoreCase = true) || 
+                                    group.contains("serie", ignoreCase = true) || 
+                                    group.contains("reality", ignoreCase = true)) && 
+                                   !group.contains("anime", ignoreCase = true)
+                    
+                    !isAnime && !isMovie && !isSeries
+                }
+            }
         }
         if (showOnlyFavs) {
-            tvChannels.filter { it.isFavorite }
+            categoryChannels.filter { it.isFavorite }
         } else {
-            tvChannels
+            categoryChannels
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -132,33 +195,38 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    private var channelsJob: kotlinx.coroutines.Job? = null
+
+    fun selectPlaylist(playlistId: Long) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _selectedPlaylistId.value = playlistId
+            channelsJob?.cancel()
+            channelsJob = viewModelScope.launch {
+                try {
+                    channelRepository.getChannelsByPlaylist(playlistId).collect { channels ->
+                        android.util.Log.d("HomeViewModel", "Loaded ${channels.size} channels for playlist: $playlistId")
+                        _allChannels.value = channels
+                        _isLoading.value = false
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("HomeViewModel", "Error loading playlist channels: ${e.message}")
+                    _isLoading.value = false
+                }
+            }
+        }
+    }
+
+    fun selectCategory(category: MainCategory) {
+        _selectedCategory.value = category
+    }
+
     private suspend fun loadChannelsFromFirstPlaylist() {
         try {
             val finalPlaylists = getPlaylistsUseCase().first()
             if (finalPlaylists.isNotEmpty()) {
                 val firstPlaylist = finalPlaylists.first()
-                android.util.Log.d("HomeViewModel", "Loading channels from playlist: ${firstPlaylist.name} (id=${firstPlaylist.id})")
-                viewModelScope.launch {
-                    try {
-                        channelRepository.getChannelsByPlaylist(firstPlaylist.id).collect { channels ->
-                            android.util.Log.d("HomeViewModel", "Loaded ${channels.size} channels from ${firstPlaylist.name}")
-                            if (channels.isNotEmpty()) {
-                                _allChannels.value = channels
-                            } else {
-                                android.util.Log.w("HomeViewModel", "No channels in playlist, trying fallback")
-                                // If first playlist has no channels, load all as fallback
-                                channelRepository.getAllChannels().collect { allCh ->
-                                    android.util.Log.d("HomeViewModel", "Fallback loaded ${allCh.size} channels")
-                                    _allChannels.value = allCh
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        android.util.Log.e("HomeViewModel", "Error loading channels: ${e.message}")
-                        e.printStackTrace()
-                        loadAllChannels()
-                    }
-                }
+                selectPlaylist(firstPlaylist.id)
             } else {
                 android.util.Log.w("HomeViewModel", "No playlists to load channels from")
                 loadAllChannels()
