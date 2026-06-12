@@ -81,6 +81,9 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import android.view.WindowManager
 import com.wootv.app.presentation.util.DebugLogger
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 
 @UnstableApi
@@ -241,8 +244,30 @@ fun HomeScreen(
         }
     }
 
-    DisposableEffect(Unit) {
-        onDispose { exoPlayer.release() }
+    // Lifecycle-aware player management: pause/stop when app goes to background
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    exoPlayer.playWhenReady = false
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    exoPlayer.stop()
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    if (activePlaybackChannel != null) {
+                        exoPlayer.playWhenReady = true
+                    }
+                }
+                else -> { }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            exoPlayer.release()
+        }
     }
 
     Column(

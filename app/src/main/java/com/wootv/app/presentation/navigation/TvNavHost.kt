@@ -61,9 +61,7 @@ fun TvNavHost(
         composable(Screen.Search.route) {
             SearchScreen(
                 onChannelClick = { channelId ->
-                    navController.navigate(Screen.Player.createRoute(channelId)) {
-                        popUpTo(Screen.Search.route) { inclusive = true }
-                    }
+                    navController.navigate(Screen.Player.createRoute(channelId))
                 },
                 onNavigateBack = { navController.popBackStack() }
             )
