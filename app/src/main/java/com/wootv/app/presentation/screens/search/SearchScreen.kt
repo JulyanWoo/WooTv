@@ -16,13 +16,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,6 +54,32 @@ fun SearchScreen(
 ) {
     val query by viewModel.query.collectAsStateWithLifecycle()
     val results by viewModel.results.collectAsStateWithLifecycle()
+
+    // Track whether user has navigated to a channel (survives recomposition)
+    val hasNavigatedToChannel = rememberSaveable { mutableStateOf(false) }
+
+    val textFieldFocusRequester = FocusRequester()
+    val resultsListFocusRequester = FocusRequester()
+    val listState = rememberLazyListState()
+
+    // Manage focus: on return from Player with results → focus the results list
+    LaunchedEffect(results) {
+        if (hasNavigatedToChannel.value && results.isNotEmpty()) {
+            try {
+                resultsListFocusRequester.requestFocus()
+            } catch (_: Exception) { }
+            hasNavigatedToChannel.value = false
+        }
+    }
+
+    // Only auto-focus TextField on first entry (no query yet)
+    LaunchedEffect(Unit) {
+        if (query.isBlank() && !hasNavigatedToChannel.value) {
+            try {
+                textFieldFocusRequester.requestFocus()
+            } catch (_: Exception) { }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -87,7 +119,8 @@ fun SearchScreen(
             onValueChange = { viewModel.onQueryChanged(it) },
             modifier = Modifier
                 .widthIn(max = 800.dp)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .focusRequester(textFieldFocusRequester),
             placeholder = {
                 androidx.compose.material3.Text(
                     "Escribe el nombre del canal...",
@@ -145,10 +178,12 @@ fun SearchScreen(
         }
 
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .widthIn(max = 800.dp)
                 .fillMaxWidth()
-                .padding(top = 8.dp),
+                .padding(top = 8.dp)
+                .focusRequester(resultsListFocusRequester),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items(results, key = { it.id }) { channel ->
@@ -161,7 +196,10 @@ fun SearchScreen(
                 ) {
                     // Channel Play Card
                     Card(
-                        onClick = { onChannelClick(channel.id) },
+                        onClick = {
+                            hasNavigatedToChannel.value = true
+                            onChannelClick(channel.id)
+                        },
                         modifier = Modifier.weight(1f),
                         colors = CardDefaults.colors(containerColor = SurfaceCard),
                         shape = CardDefaults.shape(shape = RoundedCornerShape(10.dp)),

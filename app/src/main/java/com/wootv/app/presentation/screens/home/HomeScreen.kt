@@ -46,8 +46,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.media3.common.MediaItem
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.tv.material3.Border
@@ -75,7 +73,20 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.ExoPlayer
+import android.view.WindowManager
+import com.wootv.app.presentation.util.DebugLogger
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.delay
 
+@UnstableApi
 @Composable
 fun HomeScreen(
     onChannelClick: (Long) -> Unit,
@@ -91,9 +102,111 @@ fun HomeScreen(
     val selectedCategory by homeViewModel.selectedCategory.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
-    val exoPlayer = remember { ExoPlayer.Builder(context).build() }
+
+    // Configure ExoPlayer with large buffer for stable IPTV streaming on Fire TV
+    val exoPlayer = remember {
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                30_000,  // Min buffer ms (30s)
+                120_000, // Max buffer ms (120s)
+                5_000,   // Buffer for playback ms
+                15_000   // Buffer for rebuffer ms
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
+        ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
+            .build()
+    }
+
     var focusedChannel by remember { mutableStateOf<Channel?>(null) }
     var activePlaybackChannel by remember { mutableStateOf<Channel?>(null) }
+
+    // region debug-point hp1-player-listener
+    // Add player listener for debugging stream auto-pause issue
+    remember(exoPlayer) {
+        object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                activePlaybackChannel?.let { channel ->
+                    DebugLogger.logPlayerState(
+                        channelName = channel.name,
+                        isPlaying = exoPlayer.isPlaying,
+                        playbackState = playbackState,
+                        bufferedPercentage = exoPlayer.bufferedPercentage
+                    )
+
+                    // Fix: Replay when playback ends (STATE_ENDED = 4)
+                    // This handles IPTV streams that end unexpectedly
+                    if (playbackState == Player.STATE_ENDED) {
+                        DebugLogger.logEvent("playbackEnded", mapOf(
+                            "channel" to channel.name,
+                            "action" to "replaying"
+                        ))
+                        exoPlayer.seekTo(0)
+                        exoPlayer.playWhenReady = true
+                    }
+                }
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                activePlaybackChannel?.let { channel ->
+                    DebugLogger.logEvent("isPlayingChanged", mapOf(
+                        "isPlaying" to isPlaying,
+                        "channel" to channel.name,
+                        "position" to exoPlayer.currentPosition
+                    ))
+                }
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                activePlaybackChannel?.let { channel ->
+                    DebugLogger.logPlayerError(
+                        channelName = channel.name,
+                        errorMessage = error.message ?: "Unknown error",
+                        errorStack = error.stackTrace?.joinToString("\n") ?: "No stack trace"
+                    )
+
+                    // Fix: Retry playback on error
+                    DebugLogger.logEvent("playbackError", mapOf(
+                        "channel" to channel.name,
+                        "action" to "retrying"
+                    ))
+                    exoPlayer.prepare()
+                    exoPlayer.playWhenReady = true
+                }
+            }
+        }
+    }.also { listener ->
+        exoPlayer.addListener(listener)
+    }
+
+    // Periodic buffer status logging
+    LaunchedEffect(activePlaybackChannel) {
+        while (activePlaybackChannel != null) {
+            activePlaybackChannel?.let { channel ->
+                DebugLogger.logBufferStatus(
+                    channelName = channel.name,
+                    bufferedPosition = exoPlayer.bufferedPosition,
+                    bufferedDuration = exoPlayer.bufferedPosition + (exoPlayer.duration * exoPlayer.bufferedPercentage / 100),
+                    totalDuration = exoPlayer.duration
+                )
+            }
+            delay(30_000) // Log every 30 seconds (reduced to avoid GC pressure on Fire TV)
+        }
+    }
+    // endregion
+
+    // Keep screen on while a channel is actively being previewed
+    val activity = LocalContext.current as? android.app.Activity
+    DisposableEffect(activePlaybackChannel) {
+        if (activePlaybackChannel != null) {
+            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     // Auto-play first channel when channels load or change category/playlist
     LaunchedEffect(channels) {
@@ -131,8 +244,30 @@ fun HomeScreen(
         }
     }
 
-    DisposableEffect(Unit) {
-        onDispose { exoPlayer.release() }
+    // Lifecycle-aware player management: pause/stop when app goes to background
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    exoPlayer.playWhenReady = false
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    exoPlayer.stop()
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    if (activePlaybackChannel != null) {
+                        exoPlayer.playWhenReady = true
+                    }
+                }
+                else -> { }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            exoPlayer.release()
+        }
     }
 
     Column(

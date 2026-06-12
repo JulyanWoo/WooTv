@@ -53,8 +53,20 @@ class PlaylistRepositoryImpl @Inject constructor(
             // Delete temp file after parsing
             tempFile.delete()
 
+            // Preserve favorites: save stream URLs of favorited channels before deleting
+            val favoriteStreamUrls = channelDao.getFavoriteStreamUrls(playlist.id)
+
             channelDao.deleteByPlaylist(playlist.id)
             channelDao.insertAll(channels)
+
+            // Restore favorites by matching stream URLs
+            if (favoriteStreamUrls.isNotEmpty()) {
+                // Room IN queries have a limit, batch in chunks of 500
+                favoriteStreamUrls.chunked(500).forEach { chunk ->
+                    channelDao.restoreFavoritesByStreamUrl(playlist.id, chunk)
+                }
+            }
+
             playlistDao.updateLastRefreshed(playlist.id, System.currentTimeMillis())
 
             return channels.size

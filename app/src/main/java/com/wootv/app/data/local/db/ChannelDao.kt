@@ -33,6 +33,12 @@ interface ChannelDao {
     @Query("UPDATE channels SET isFavorite = :isFavorite WHERE id = :id")
     suspend fun toggleFavorite(id: Long, isFavorite: Boolean)
 
+    @Query("SELECT streamUrl FROM channels WHERE playlistId = :playlistId AND isFavorite = 1")
+    suspend fun getFavoriteStreamUrls(playlistId: Long): List<String>
+
+    @Query("UPDATE channels SET isFavorite = 1 WHERE playlistId = :playlistId AND streamUrl IN (:streamUrls)")
+    suspend fun restoreFavoritesByStreamUrl(playlistId: Long, streamUrls: List<String>)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(channels: List<ChannelEntity>)
 
