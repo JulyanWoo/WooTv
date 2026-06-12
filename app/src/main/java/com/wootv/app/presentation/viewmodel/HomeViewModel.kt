@@ -50,75 +50,206 @@ class HomeViewModel @Inject constructor(
     private val _selectedCategory = MutableStateFlow(MainCategory.TV)
     val selectedCategory: StateFlow<MainCategory> = _selectedCategory
 
+    private val _selectedGroup = MutableStateFlow<String?>(null)
+    val selectedGroup: StateFlow<String?> = _selectedGroup
+
     private val _showOnlyFavorites = MutableStateFlow(false)
     val showOnlyFavorites: StateFlow<Boolean> = _showOnlyFavorites
 
     private val _allChannels = MutableStateFlow<List<Channel>>(emptyList())
     val allChannels: StateFlow<List<Channel>> = _allChannels
 
+    companion object {
+        private val NoticiasKeywords = listOf(
+            "ntn24", "cablenoticias", "caracol internacional", "noticias rcn", "rcn", "citytv",
+            "ecuavisa", "teleamazonas", "tc televisión", "tc television", "rtu", "rts",
+            "foro tv", "milenio", "adn 40", "n+", "excelsior", "canal n", "rpp",
+            "tv perú noticias", "tv peru noticias", "latina noticias", "atv+"
+        )
+
+        private val DeportesKeywords = listOf(
+            "el canal del fútbol", "el canal del futbol", "ecdf", "goltv", "espn", "win sports",
+            "dsports", "directv sports", "claro sports", "fox sports", "tyc sports"
+        )
+
+        private val PeliculasKeywords = listOf(
+            "hbo", "tnt", "space", "cinecanal", "star channel", "fx", "universal tv", "universal",
+            "studio universal", "paramount network", "paramount", "amc", "axn", "golden", "golden edge",
+            "cine latino", "de película", "de pelicula"
+        )
+
+        private val InfantilKeywords = listOf(
+            "cartoon network", "nickelodeon", "disney channel", "disney", "discovery kids",
+            "dreamworks", "tooncast", "cartoonito", "nick jr", "baby tv"
+        )
+    }
+
+    private fun cleanCategoryName(name: String): String {
+        // 1. Strip country prefixes like "CO | ", "MX - ", etc.
+        val prefixRegex = Regex("^(?i)(co|mx|es|ec|pe|ar|cl|us|it|fr|pt|br|col|mex|ecu|per|colombia)\\s*[\\-_|:\\s]\\s*")
+        val withoutPrefix = name.trim().replace(prefixRegex, "")
+        
+        // 2. Remove emojis and miscellaneous symbols
+        val emojiPattern = Regex("[\\uD83C-\\uDBFF\\uDC00-\\uDFFF\\u2600-\\u27BF\\u2300-\\u23FF\\u2B50\\u2B06\\u2190-\\u21FF]|\\p{So}")
+        val noEmojis = withoutPrefix.replace(emojiPattern, "")
+        
+        // 3. Replace special characters with space
+        val cleanChars = noEmojis.replace(Regex("[\\-_|:\\[\\]()➔♦🔥💥⚡⭐📍✨📌,/+.\\\\&]"), " ")
+        
+        // 4. Collapse spaces and trim
+        val cleaned = cleanChars.replace(Regex("\\s+"), " ").trim()
+        
+        // 5. Convert to Title Case
+        return cleaned.split(" ").filter { it.isNotBlank() }.joinToString(" ") { word ->
+            word.lowercase().replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        }
+    }
+
+    val availableGroups: StateFlow<List<String>> = _allChannels
+        .map { channels ->
+            val fixedCategories = listOf("Noticias", "Deportes", "Películas", "Infantil")
+            channels.mapNotNull { it.groupTitle }
+                .map { cleanCategoryName(it) }
+                .filter { it.isNotBlank() && it !in fixedCategories }
+                .distinct()
+                .sortedWith(String.CASE_INSENSITIVE_ORDER)
+        }
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
     val filteredChannels: StateFlow<List<Channel>> = combine(
         _allChannels,
         _selectedCategory,
+        _selectedGroup,
         _showOnlyFavorites
-    ) { channels, category, showOnlyFavs ->
-        val categoryChannels = channels.filter { channel ->
-            val group = channel.groupTitle ?: ""
-            when (category) {
-                MainCategory.ANIME -> {
-                    group.contains("anime", ignoreCase = true)
-                }
-                MainCategory.MOVIES -> {
-                    (group.contains("cine", ignoreCase = true) || 
-                     group.contains("movie", ignoreCase = true) || 
-                     group.contains("cinema", ignoreCase = true) || 
-                     group.contains("pelicula", ignoreCase = true) || 
-                     group.contains("película", ignoreCase = true) || 
-                     group.contains("estrenos", ignoreCase = true) || 
-                     group.contains("sagas", ignoreCase = true)) && 
-                    !group.contains("anime", ignoreCase = true) && 
-                    !group.contains("series", ignoreCase = true) && 
-                    !group.contains("season", ignoreCase = true) && 
-                    !group.contains("temporada", ignoreCase = true)
-                }
-                MainCategory.SERIES -> {
-                    (group.contains("series", ignoreCase = true) || 
-                     group.contains("vix", ignoreCase = true) || 
-                     group.contains("season", ignoreCase = true) || 
-                     group.contains("temporada", ignoreCase = true) || 
-                     group.contains("serie", ignoreCase = true) || 
-                     group.contains("reality", ignoreCase = true)) && 
-                    !group.contains("anime", ignoreCase = true)
-                }
-                MainCategory.TV -> {
-                    val isAnime = group.contains("anime", ignoreCase = true)
-                    val isMovie = (group.contains("cine", ignoreCase = true) || 
-                                   group.contains("movie", ignoreCase = true) || 
-                                   group.contains("cinema", ignoreCase = true) || 
-                                   group.contains("pelicula", ignoreCase = true) || 
-                                   group.contains("película", ignoreCase = true) || 
-                                   group.contains("estrenos", ignoreCase = true) || 
-                                   group.contains("sagas", ignoreCase = true)) && 
-                                  !group.contains("anime", ignoreCase = true) && 
-                                  !group.contains("series", ignoreCase = true) && 
-                                  !group.contains("season", ignoreCase = true) && 
-                                  !group.contains("temporada", ignoreCase = true)
-                    val isSeries = (group.contains("series", ignoreCase = true) || 
-                                    group.contains("vix", ignoreCase = true) || 
-                                    group.contains("season", ignoreCase = true) || 
-                                    group.contains("temporada", ignoreCase = true) || 
-                                    group.contains("serie", ignoreCase = true) || 
-                                    group.contains("reality", ignoreCase = true)) && 
-                                   !group.contains("anime", ignoreCase = true)
+    ) { channels, category, selectedGrp, showOnlyFavs ->
+        val categoryChannels = if (selectedGrp != null) {
+            val fixedCategories = listOf("Noticias", "Deportes", "Películas", "Infantil")
+            if (selectedGrp in fixedCategories) {
+                channels.filter { channel ->
+                    val cleanName = channel.name.lowercase()
+                    val group = (channel.groupTitle ?: "").lowercase()
+                    val cleanGroup = cleanCategoryName(group).lowercase()
                     
-                    !isAnime && !isMovie && !isSeries
+                    when (selectedGrp) {
+                        "Noticias" -> {
+                            // Explicitly exclude sports, movies, and kids channels to prevent overlap/substring bugs
+                            val isSports = cleanName.contains("sports") || cleanName.contains("sport") || cleanName.contains("deportes") || cleanName.contains("deporte") || cleanName.contains("futbol") || cleanName.contains("fútbol") || cleanName.contains("espn") || cleanName.contains("win") || cleanName.contains("fox") || cleanName.contains("goltv") || cleanName.contains("tyc") || cleanGroup.contains("deportes") || cleanGroup.contains("sports")
+                            val isMovies = cleanName.contains("hbo") || cleanName.contains("tnt") || cleanName.contains("space") || cleanName.contains("cine") || cleanName.contains("movie") || cleanGroup.contains("película") || cleanGroup.contains("pelicula") || cleanGroup.contains("movies") || cleanGroup.contains("cine")
+                            val isInfantil = cleanName.contains("cartoon") || cleanName.contains("nickelodeon") || cleanName.contains("disney") || cleanName.contains("discovery kids") || cleanName.contains("nick") || cleanGroup.contains("infantil") || cleanGroup.contains("kids")
+                            
+                            if (isSports || isMovies || isInfantil) {
+                                false
+                            } else {
+                                val nameMatch = NoticiasKeywords.any { keyword ->
+                                    if (keyword == "rts") {
+                                        cleanName.contains("rts") && !cleanName.contains("sports") && !cleanName.contains("sport")
+                                    } else {
+                                        cleanName.contains(keyword)
+                                    }
+                                }
+                                val groupMatch = cleanGroup.contains("noticias") || cleanGroup.contains("news") || cleanGroup.contains("informacion") || cleanGroup.contains("información")
+                                nameMatch || groupMatch
+                            }
+                        }
+                        "Deportes" -> {
+                            val nameMatch = DeportesKeywords.any { cleanName.contains(it) }
+                            val groupMatch = cleanGroup.contains("deportes") || cleanGroup.contains("sports")
+                            nameMatch || groupMatch
+                        }
+                        "Películas" -> {
+                            val nameMatch = PeliculasKeywords.any { cleanName.contains(it) }
+                            val groupMatch = cleanGroup.contains("película") || cleanGroup.contains("pelicula") || cleanGroup.contains("movies") || cleanGroup.contains("cine") || cleanGroup.contains("cinema")
+                            nameMatch || groupMatch
+                        }
+                        "Infantil" -> {
+                            val nameMatch = InfantilKeywords.any { cleanName.contains(it) }
+                            val groupMatch = cleanGroup.contains("infantil") || cleanGroup.contains("kids") || cleanGroup.contains("niños") || cleanGroup.contains("ninos")
+                            nameMatch || groupMatch
+                        }
+                        else -> false
+                    }
+                }
+            } else {
+                channels.filter { channel ->
+                    val group = channel.groupTitle ?: ""
+                    cleanCategoryName(group).equals(selectedGrp, ignoreCase = true)
+                }
+            }
+        } else {
+            channels.filter { channel ->
+                val group = channel.groupTitle ?: ""
+                when (category) {
+                    MainCategory.ANIME -> {
+                        group.contains("anime", ignoreCase = true)
+                    }
+                    MainCategory.MOVIES -> {
+                        (group.contains("cine", ignoreCase = true) || 
+                         group.contains("movie", ignoreCase = true) || 
+                         group.contains("cinema", ignoreCase = true) || 
+                         group.contains("pelicula", ignoreCase = true) || 
+                         group.contains("película", ignoreCase = true) || 
+                         group.contains("estrenos", ignoreCase = true) || 
+                         group.contains("sagas", ignoreCase = true)) && 
+                        !group.contains("anime", ignoreCase = true) && 
+                        !group.contains("series", ignoreCase = true) && 
+                        !group.contains("season", ignoreCase = true) && 
+                        !group.contains("temporada", ignoreCase = true)
+                    }
+                    MainCategory.SERIES -> {
+                        (group.contains("series", ignoreCase = true) || 
+                         group.contains("vix", ignoreCase = true) || 
+                         group.contains("season", ignoreCase = true) || 
+                         group.contains("temporada", ignoreCase = true) || 
+                         group.contains("serie", ignoreCase = true) || 
+                         group.contains("reality", ignoreCase = true)) && 
+                        !group.contains("anime", ignoreCase = true)
+                    }
+                    MainCategory.TV -> {
+                        val isAnime = group.contains("anime", ignoreCase = true)
+                        val isMovie = (group.contains("cine", ignoreCase = true) || 
+                                       group.contains("movie", ignoreCase = true) || 
+                                       group.contains("cinema", ignoreCase = true) || 
+                                       group.contains("pelicula", ignoreCase = true) || 
+                                       group.contains("película", ignoreCase = true) || 
+                                       group.contains("estrenos", ignoreCase = true) || 
+                                       group.contains("sagas", ignoreCase = true)) && 
+                                      !group.contains("anime", ignoreCase = true) && 
+                                      !group.contains("series", ignoreCase = true) && 
+                                      !group.contains("season", ignoreCase = true) && 
+                                      !group.contains("temporada", ignoreCase = true)
+                        val isSeries = (group.contains("series", ignoreCase = true) || 
+                                        group.contains("vix", ignoreCase = true) || 
+                                        group.contains("season", ignoreCase = true) || 
+                                        group.contains("temporada", ignoreCase = true) || 
+                                        group.contains("serie", ignoreCase = true) || 
+                                        group.contains("reality", ignoreCase = true)) && 
+                                       !group.contains("anime", ignoreCase = true)
+                        
+                        !isAnime && !isMovie && !isSeries
+                    }
                 }
             }
         }
-        if (showOnlyFavs) {
+        val filtered = if (showOnlyFavs) {
             categoryChannels.filter { it.isFavorite }
         } else {
             categoryChannels
         }
+        
+        // Show Colombia channels first, then the rest, preserving original order
+        val (colombia, rest) = filtered.partition { channel ->
+            val name = channel.name
+            val group = channel.groupTitle ?: ""
+            group.contains("colombia", ignoreCase = true) ||
+            group.contains("co |", ignoreCase = true) ||
+            group.contains("co:", ignoreCase = true) ||
+            name.contains("colombia", ignoreCase = true) ||
+            name.contains("co |", ignoreCase = true) ||
+            name.startsWith("co:", ignoreCase = true) ||
+            name.contains("(co)", ignoreCase = true) ||
+            name.contains("[co]", ignoreCase = true)
+        }
+        colombia + rest
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _isLoading = MutableStateFlow(true)
@@ -201,6 +332,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             _isLoading.value = true
             _selectedPlaylistId.value = playlistId
+            _selectedGroup.value = null
             channelsJob?.cancel()
             channelsJob = viewModelScope.launch {
                 try {
@@ -218,7 +350,12 @@ class HomeViewModel @Inject constructor(
     }
 
     fun selectCategory(category: MainCategory) {
+        _selectedGroup.value = null
         _selectedCategory.value = category
+    }
+
+    fun selectGroup(group: String?) {
+        _selectedGroup.value = group
     }
 
     private suspend fun loadChannelsFromFirstPlaylist() {

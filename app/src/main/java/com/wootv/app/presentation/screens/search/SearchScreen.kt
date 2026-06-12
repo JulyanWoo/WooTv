@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -261,7 +262,7 @@ fun SearchScreen(
                                         text = channel.name,
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = OnSurfaceDark,
+                                        color = Color.White,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f, fill = false)
@@ -279,7 +280,7 @@ fun SearchScreen(
                                     Text(
                                         text = group,
                                         fontSize = 12.sp,
-                                        color = OnSurfaceVariantDark,
+                                        color = Color.White.copy(alpha = 0.5f),
                                         modifier = Modifier.padding(top = 2.dp)
                                     )
                                 }

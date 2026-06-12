@@ -24,10 +24,24 @@ class ChannelListViewModel @Inject constructor(
     val selectedGroup: StateFlow<String?> = _selectedGroup
 
     private val _allChannels = MutableStateFlow<List<Channel>>(emptyList())
+    val allChannels: StateFlow<List<Channel>> = _allChannels
 
     val channels: StateFlow<List<Channel>> = _allChannels
         .combine(_selectedGroup) { all, group ->
-            if (group == null) all else all.filter { it.groupTitle == group }
+            val filtered = if (group == null) all else all.filter { it.groupTitle == group }
+            val (colombia, rest) = filtered.partition { channel ->
+                val name = channel.name
+                val g = channel.groupTitle ?: ""
+                g.contains("colombia", ignoreCase = true) ||
+                g.contains("co |", ignoreCase = true) ||
+                g.contains("co:", ignoreCase = true) ||
+                name.contains("colombia", ignoreCase = true) ||
+                name.contains("co |", ignoreCase = true) ||
+                name.startsWith("co:", ignoreCase = true) ||
+                name.contains("(co)", ignoreCase = true) ||
+                name.contains("[co]", ignoreCase = true)
+            }
+            colombia + rest
         }
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 

@@ -37,5 +37,5 @@ val GradientStart = Color(0xFF070412)
 val GradientEnd = Color(0xFF110B26)
 
 // Focus
-val FocusBorder = Color(0xFFBC13FE) // Pure Neon Purple Focus
-val FocusGlow = Color(0x40BC13FE)
+val FocusBorder = Color(0xCC8B22FF) // Pure Neon Purple Focus with 80% opacity
+val FocusGlow = Color(0x1C8B22FF)

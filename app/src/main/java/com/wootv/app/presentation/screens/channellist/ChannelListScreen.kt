@@ -61,6 +61,12 @@ import com.wootv.app.presentation.viewmodel.ChannelListViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Tv
 
 @UnstableApi
 @Composable
@@ -71,8 +77,13 @@ fun ChannelListScreen(
     viewModel: ChannelListViewModel = hiltViewModel()
 ) {
     val channels by viewModel.channels.collectAsStateWithLifecycle()
+    val allChannels by viewModel.allChannels.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    val channelIndexMap = remember(allChannels) {
+        allChannels.mapIndexed { index, channel -> channel.id to (index + 1) }.toMap()
+    }
 
     // Configure ExoPlayer with larger buffer for stable IPTV streaming on Fire TV
     val exoPlayer = remember {
@@ -234,12 +245,14 @@ fun ChannelListScreen(
                 modifier = Modifier
                     .weight(0.38f)
                     .fillMaxHeight(),
-                contentPadding = PaddingValues(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                contentPadding = PaddingValues(vertical = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
             ) {
                 itemsIndexed(channels, key = { _, ch -> ch.id }) { index, channel ->
                     val isFocused = focusedChannel?.id == channel.id
                     val bgColor = if (isFocused) SurfaceCardHover else Color.Transparent
+                    val logoUrl = channel.tvgLogo ?: channel.logoUrl
+                    val originalIndex = channelIndexMap[channel.id] ?: (index + 1)
 
                     Card(
                         onClick = { onChannelClick(channel.id) },
@@ -247,52 +260,95 @@ fun ChannelListScreen(
                             .fillMaxWidth()
                             .onFocusChanged { if (it.isFocused) focusedChannel = channel },
                         colors = CardDefaults.colors(containerColor = bgColor),
-                        shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp)),
+                        shape = CardDefaults.shape(shape = RoundedCornerShape(6.dp)),
                         border = CardDefaults.border(
                             focusedBorder = Border(
                                 border = BorderStroke(1.dp, FocusBorder),
-                                shape = RoundedCornerShape(8.dp)
+                                shape = RoundedCornerShape(6.dp)
                             )
                         )
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                .padding(horizontal = 8.dp, vertical = 3.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "${index + 1}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = if (isFocused) Blue400 else OnSurfaceVariantDark,
-                                modifier = Modifier.width(28.dp)
-                            )
+                            // Channel number as a compact boxed badge/pill
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        color = if (isFocused) Blue500.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.05f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
+                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "$originalIndex",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isFocused) Blue400 else Color.White.copy(alpha = 0.7f)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            // Channel logo
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(SurfaceCard),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (logoUrl != null) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(logoUrl)
+                                            .crossfade(true)
+                                            .build(),
+                                        contentDescription = channel.name,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Tv,
+                                        contentDescription = null,
+                                        tint = OnSurfaceVariantDark,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
 
                             if (isFocused) {
                                 Box(
                                     modifier = Modifier
-                                        .size(6.dp)
+                                        .size(4.dp)
                                         .clip(CircleShape)
                                         .background(RedLive)
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                             }
 
+                            // Channel info
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = channel.name,
-                                    fontSize = 14.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = if (isFocused) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (isFocused) OnSurfaceDark else OnSurfaceVariantDark,
+                                    color = if (isFocused) Color.White else Color.White.copy(alpha = 0.9f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 channel.groupTitle?.let { group ->
                                     Text(
                                         text = group,
-                                        fontSize = 11.sp,
-                                        color = OnSurfaceVariantDark.copy(alpha = 0.7f),
+                                        fontSize = 9.sp,
+                                        color = if (isFocused) Color.White.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.45f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )

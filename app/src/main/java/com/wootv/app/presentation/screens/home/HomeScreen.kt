@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -69,6 +70,8 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.TvOff
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.clickable
@@ -87,6 +90,13 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
 
 @UnstableApi
 @Composable
@@ -96,6 +106,7 @@ fun HomeScreen(
     homeViewModel: HomeViewModel = hiltViewModel()
 ) {
     val channels by homeViewModel.filteredChannels.collectAsStateWithLifecycle()
+    val allChannels by homeViewModel.allChannels.collectAsStateWithLifecycle()
     val showOnlyFavorites by homeViewModel.showOnlyFavorites.collectAsStateWithLifecycle()
     val isLoading by homeViewModel.isLoading.collectAsStateWithLifecycle()
     val playlistNameMap by homeViewModel.playlistNameMap.collectAsStateWithLifecycle()
@@ -105,6 +116,10 @@ fun HomeScreen(
 
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    val channelIndexMap = remember(allChannels) {
+        allChannels.mapIndexed { index, channel -> channel.id to (index + 1) }.toMap()
+    }
 
     // Configure ExoPlayer with large buffer for stable IPTV streaming on Fire TV
     val exoPlayer = remember {
@@ -286,13 +301,16 @@ fun HomeScreen(
                 )
             )
     ) {
+        val availableGroups by homeViewModel.availableGroups.collectAsStateWithLifecycle()
+        val selectedGroup by homeViewModel.selectedGroup.collectAsStateWithLifecycle()
+
         // Top Bar
         HomeScreenTopBar(
-            playlists = playlists,
-            selectedPlaylistId = selectedPlaylistId,
+            availableGroups = availableGroups,
+            selectedGroup = selectedGroup,
             showOnlyFavorites = showOnlyFavorites,
             onShowOnlyFavoritesToggle = { homeViewModel.setShowOnlyFavorites(it) },
-            onPlaylistSelect = { homeViewModel.selectPlaylist(it.id) },
+            onGroupSelect = { homeViewModel.selectGroup(it) },
             onSearchClick = onSearchClick
         )
 
@@ -300,7 +318,7 @@ fun HomeScreen(
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp)
+                .padding(start = 24.dp, end = 24.dp, bottom = 16.dp)
         ) {
             // Left Sidebar
             CategorySidebar(
@@ -316,10 +334,11 @@ fun HomeScreen(
                 focusedChannel = focusedChannel,
                 isLoading = isLoading,
                 playlistNameMap = playlistNameMap,
+                channelIndexMap = channelIndexMap,
                 onFocusChannel = { focusedChannel = it },
                 onChannelClick = onChannelClick,
                 modifier = Modifier
-                    .weight(0.32f)
+                    .weight(0.26f)
                     .fillMaxHeight()
             )
 
@@ -331,7 +350,7 @@ fun HomeScreen(
                 activeChannel = activePlaybackChannel,
                 onToggleFavorite = { channelId, isFav -> homeViewModel.toggleFavorite(channelId, isFav) },
                 modifier = Modifier
-                    .weight(0.68f)
+                    .weight(0.74f)
                     .fillMaxHeight()
             )
         }
@@ -340,97 +359,102 @@ fun HomeScreen(
 
 @Composable
 private fun HomeScreenTopBar(
-    playlists: List<com.wootv.app.domain.model.Playlist>,
-    selectedPlaylistId: Long?,
+    availableGroups: List<String>,
+    selectedGroup: String?,
     showOnlyFavorites: Boolean,
     onShowOnlyFavoritesToggle: (Boolean) -> Unit,
-    onPlaylistSelect: (com.wootv.app.domain.model.Playlist) -> Unit,
+    onGroupSelect: (String?) -> Unit,
     onSearchClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var showPlaylistDialog by remember { mutableStateOf(false) }
+    var showGroupDialog by remember { mutableStateOf(false) }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 8.dp),
+            .padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left: Logo
+        // Left: Logo (reduced size 35%)
         Image(
             painter = painterResource(id = R.drawable.ic_top_logo),
             contentDescription = "WooTv Logo",
-            modifier = Modifier.height(36.dp),
+            modifier = Modifier.height(23.dp),
             contentScale = ContentScale.Fit
         )
 
-        // Right: Horizontal row of Action Cards (Favorites, Playlists, Search)
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Right: Horizontal row of Action Cards (Favorites, Categories, Search) - low profile TV size
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             // Favorites Button
             Card(
                 onClick = { onShowOnlyFavoritesToggle(!showOnlyFavorites) },
                 colors = CardDefaults.colors(
-                    containerColor = if (showOnlyFavorites) Blue500 else SurfaceCard,
-                    focusedContainerColor = SurfaceCardHover
+                    containerColor = if (showOnlyFavorites) Blue500.copy(alpha = 0.6f) else Color.Transparent,
+                    focusedContainerColor = SurfaceCard
                 ),
-                shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp)),
+                shape = CardDefaults.shape(shape = RoundedCornerShape(6.dp)),
                 border = CardDefaults.border(
                     focusedBorder = Border(
                         border = BorderStroke(1.dp, FocusBorder),
-                        shape = RoundedCornerShape(8.dp)
-                    )
+                        shape = RoundedCornerShape(6.dp)
+                    ),
+                    border = Border.None
                 )
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = if (showOnlyFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         contentDescription = "Favoritos",
                         tint = if (showOnlyFavorites) Color.White else OnSurfaceVariantDark,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(12.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "Favoritos",
-                        fontSize = 13.sp,
+                        fontSize = 10.5.sp,
                         color = if (showOnlyFavorites) Color.White else OnSurfaceVariantDark
                     )
                 }
             }
 
-            // Playlist Switcher Button
+            // Categories Selector Button
             Card(
-                onClick = { showPlaylistDialog = true },
+                onClick = { showGroupDialog = true },
                 colors = CardDefaults.colors(
-                    containerColor = SurfaceCard,
-                    focusedContainerColor = SurfaceCardHover
+                    containerColor = if (selectedGroup != null) Blue500.copy(alpha = 0.6f) else Color.Transparent,
+                    focusedContainerColor = SurfaceCard
                 ),
-                shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp)),
+                shape = CardDefaults.shape(shape = RoundedCornerShape(6.dp)),
                 border = CardDefaults.border(
                     focusedBorder = Border(
                         border = BorderStroke(1.dp, FocusBorder),
-                        shape = RoundedCornerShape(8.dp)
-                    )
+                        shape = RoundedCornerShape(6.dp)
+                    ),
+                    border = Border.None
                 )
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.List,
-                        contentDescription = "Listas",
-                        tint = OnSurfaceVariantDark,
-                        modifier = Modifier.size(20.dp)
+                        imageVector = Icons.Default.Category,
+                        contentDescription = "Categorías",
+                        tint = if (selectedGroup != null) Color.White else OnSurfaceVariantDark,
+                        modifier = Modifier.size(12.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "Listas",
-                        fontSize = 13.sp,
-                        color = OnSurfaceVariantDark
+                        text = selectedGroup ?: "Categorías",
+                        fontSize = 10.5.sp,
+                        color = if (selectedGroup != null) Color.White else OnSurfaceVariantDark,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 120.dp)
                     )
                 }
             }
@@ -439,31 +463,32 @@ private fun HomeScreenTopBar(
             Card(
                 onClick = onSearchClick,
                 colors = CardDefaults.colors(
-                    containerColor = SurfaceCard,
-                    focusedContainerColor = SurfaceCardHover
+                    containerColor = Color.Transparent,
+                    focusedContainerColor = SurfaceCard
                 ),
-                shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp)),
+                shape = CardDefaults.shape(shape = RoundedCornerShape(6.dp)),
                 border = CardDefaults.border(
                     focusedBorder = Border(
                         border = BorderStroke(1.dp, FocusBorder),
-                        shape = RoundedCornerShape(8.dp)
-                    )
+                        shape = RoundedCornerShape(6.dp)
+                    ),
+                    border = Border.None
                 )
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = "Buscar",
                         tint = OnSurfaceVariantDark,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(12.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "Buscar",
-                        fontSize = 13.sp,
+                        fontSize = 10.5.sp,
                         color = OnSurfaceVariantDark
                     )
                 }
@@ -471,10 +496,10 @@ private fun HomeScreenTopBar(
         }
     }
 
-    // Modal Dialog for Playlist Switcher
-    if (showPlaylistDialog) {
+    // Modal Dialog for Category Switcher
+    if (showGroupDialog) {
         androidx.compose.ui.window.Dialog(
-            onDismissRequest = { showPlaylistDialog = false }
+            onDismissRequest = { showGroupDialog = false }
         ) {
             Box(
                 modifier = Modifier
@@ -490,7 +515,7 @@ private fun HomeScreenTopBar(
                         .padding(24.dp)
                 ) {
                     Text(
-                        text = "Seleccionar Lista",
+                        text = "Seleccionar Categoría",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = OnSurfaceDark,
@@ -498,15 +523,63 @@ private fun HomeScreenTopBar(
                     )
                     
                     LazyColumn(
-                        modifier = Modifier.wrapContentHeight(),
+                        modifier = Modifier.height(300.dp), // fixed height for category scrollability
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(playlists) { playlist ->
-                            val isSelected = playlist.id == selectedPlaylistId
+                        // "Todas las categorías" option at top
+                        item {
+                            val isAllSelected = selectedGroup == null
                             Card(
                                 onClick = {
-                                    onPlaylistSelect(playlist)
-                                    showPlaylistDialog = false
+                                    onGroupSelect(null)
+                                    showGroupDialog = false
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.colors(
+                                    containerColor = if (isAllSelected) Blue500 else SurfaceCardHover,
+                                    focusedContainerColor = SurfaceCardHover
+                                ),
+                                shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp)),
+                                border = CardDefaults.border(
+                                    focusedBorder = Border(
+                                        border = BorderStroke(1.dp, FocusBorder),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Todas las categorías",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (isAllSelected) Color.White else OnSurfaceVariantDark
+                                    )
+                                    if (isAllSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Fixed Categories
+                        val fixedCategories = listOf("Noticias", "Deportes", "Películas", "Infantil")
+                        items(fixedCategories) { category ->
+                            val isSelected = category == selectedGroup
+                            Card(
+                                onClick = {
+                                    onGroupSelect(category)
+                                    showGroupDialog = false
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = CardDefaults.colors(
@@ -529,10 +602,59 @@ private fun HomeScreenTopBar(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = playlist.name,
+                                        text = category,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Medium,
                                         color = if (isSelected) Color.White else OnSurfaceVariantDark
+                                    )
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Custom M3U parsed groups
+                        items(availableGroups) { group ->
+                            val isSelected = group == selectedGroup
+                            Card(
+                                onClick = {
+                                    onGroupSelect(group)
+                                    showGroupDialog = false
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.colors(
+                                    containerColor = if (isSelected) Blue500 else SurfaceCardHover,
+                                    focusedContainerColor = SurfaceCardHover
+                                ),
+                                shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp)),
+                                border = CardDefaults.border(
+                                    focusedBorder = Border(
+                                        border = BorderStroke(1.dp, FocusBorder),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = group,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (isSelected) Color.White else OnSurfaceVariantDark,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
                                     )
                                     if (isSelected) {
                                         Icon(
@@ -558,13 +680,22 @@ private fun CategorySidebar(
     onCategorySelect: (MainCategory) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var isSidebarFocused by remember { mutableStateOf(false) }
+
+    val sidebarWidth by animateDpAsState(
+        targetValue = if (isSidebarFocused) 180.dp else 64.dp,
+        animationSpec = tween(durationMillis = 250),
+        label = "SidebarWidth"
+    )
+
     Column(
         modifier = modifier
-            .width(80.dp)
+            .width(sidebarWidth)
             .fillMaxHeight()
             .clip(RoundedCornerShape(16.dp))
             .background(SurfaceCard)
-            .padding(vertical = 16.dp),
+            .padding(vertical = 16.dp)
+            .onFocusChanged { isSidebarFocused = it.hasFocus },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -581,38 +712,53 @@ private fun CategorySidebar(
             Card(
                 onClick = { onCategorySelect(category) },
                 modifier = Modifier
-                    .size(64.dp),
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .padding(horizontal = 8.dp),
                 colors = CardDefaults.colors(
                     containerColor = if (isSelected) Blue500 else Color.Transparent,
                     focusedContainerColor = SurfaceCardHover,
                     pressedContainerColor = Blue600
                 ),
-                shape = CardDefaults.shape(shape = RoundedCornerShape(12.dp)),
+                shape = CardDefaults.shape(shape = RoundedCornerShape(10.dp)),
                 border = CardDefaults.border(
                     focusedBorder = Border(
                         border = BorderStroke(1.dp, FocusBorder),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(10.dp)
                     )
                 )
             ) {
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = if (isSidebarFocused) Arrangement.Start else Arrangement.Center
                 ) {
                     Icon(
                         imageVector = icon,
                         contentDescription = label,
                         tint = if (isSelected) Color.White else OnSurfaceVariantDark,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(22.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = label,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isSelected) Color.White else OnSurfaceVariantDark
-                    )
+                    
+                    AnimatedVisibility(
+                        visible = isSidebarFocused,
+                        enter = fadeIn(animationSpec = tween(150)) + expandHorizontally(),
+                        exit = fadeOut(animationSpec = tween(150)) + shrinkHorizontally()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = label,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isSelected) Color.White else OnSurfaceVariantDark,
+                                maxLines = 1,
+                                overflow = TextOverflow.Clip
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -625,6 +771,7 @@ private fun ChannelListPanel(
     focusedChannel: Channel?,
     isLoading: Boolean,
     playlistNameMap: Map<Long, String>,
+    channelIndexMap: Map<Long, Int>,
     onFocusChannel: (Channel) -> Unit,
     onChannelClick: (Long) -> Unit,
     modifier: Modifier = Modifier
@@ -634,19 +781,19 @@ private fun ChannelListPanel(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 4.dp),
+                .padding(horizontal = 4.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = "Canales",
-                fontSize = 16.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = OnSurfaceDark
             )
             Text(
                 text = "${channels.size}",
-                fontSize = 13.sp,
+                fontSize = 11.sp,
                 color = OnSurfaceVariantDark
             )
         }
@@ -659,18 +806,12 @@ private fun ChannelListPanel(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(
                         color = Blue400,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(28.dp)
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Cargando canales...",
                         color = OnSurfaceVariantDark,
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Por favor espera...",
-                        color = Blue400,
                         fontSize = 12.sp
                     )
                 }
@@ -685,18 +826,12 @@ private fun ChannelListPanel(
                         imageVector = Icons.Default.TvOff,
                         contentDescription = null,
                         tint = OnSurfaceVariantDark,
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier.size(36.dp)
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "No hay canales",
                         color = OnSurfaceVariantDark,
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Selecciona otra categoría o lista...",
-                        color = Blue400,
                         fontSize = 12.sp
                     )
                 }
@@ -704,14 +839,15 @@ private fun ChannelListPanel(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                contentPadding = PaddingValues(vertical = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
             ) {
                 itemsIndexed(channels, key = { _, ch -> ch.id }) { index, channel ->
                     val isFocused = focusedChannel?.id == channel.id
+                    val originalIndex = channelIndexMap[channel.id] ?: (index + 1)
                     ChannelListItem(
                         channel = channel,
-                        index = index + 1,
+                        index = originalIndex,
                         isFocused = isFocused,
                         playlistNameMap = playlistNameMap,
                         onFocus = { onFocusChannel(channel) },
@@ -741,34 +877,45 @@ private fun ChannelListItem(
             .fillMaxWidth()
             .onFocusChanged { if (it.isFocused) onFocus() },
         colors = CardDefaults.colors(containerColor = bgColor),
-        shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp)),
+        shape = CardDefaults.shape(shape = RoundedCornerShape(6.dp)),
         border = CardDefaults.border(
             focusedBorder = Border(
                 border = BorderStroke(1.dp, FocusBorder),
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(6.dp)
             )
         )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .padding(horizontal = 8.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Channel number
-            Text(
-                text = "$index",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                color = if (isFocused) Blue400 else OnSurfaceVariantDark,
-                modifier = Modifier.width(24.dp)
-            )
+            // Channel number as a compact boxed badge/pill
+            Box(
+                modifier = Modifier
+                    .background(
+                        color = if (isFocused) Blue500.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.05f),
+                        shape = RoundedCornerShape(4.dp)
+                    )
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "$index",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isFocused) Blue400 else Color.White.copy(alpha = 0.7f)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(6.dp))
 
             // Channel logo
             Box(
                 modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(4.dp))
                     .background(SurfaceCard),
                 contentAlignment = Alignment.Center
             ) {
@@ -787,22 +934,22 @@ private fun ChannelListItem(
                         imageVector = Icons.Default.Tv,
                         contentDescription = null,
                         tint = OnSurfaceVariantDark,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(14.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(8.dp))
 
             // Live indicator dot
             if (isFocused) {
                 Box(
                     modifier = Modifier
-                        .size(6.dp)
+                        .size(4.dp)
                         .clip(CircleShape)
                         .background(RedLive)
                 )
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(4.dp))
             }
 
             // Channel info
@@ -810,9 +957,9 @@ private fun ChannelListItem(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = channel.name,
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         fontWeight = if (isFocused) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (isFocused) OnSurfaceDark else OnSurfaceVariantDark,
+                        color = if (isFocused) Color.White else Color.White.copy(alpha = 0.9f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
@@ -823,7 +970,7 @@ private fun ChannelListItem(
                             imageVector = Icons.Default.Favorite,
                             contentDescription = null,
                             tint = RedLive,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(12.dp)
                         )
                     }
                 }
@@ -831,8 +978,8 @@ private fun ChannelListItem(
                 if (group.isNotEmpty()) {
                     Text(
                         text = group,
-                        fontSize = 10.sp,
-                        color = OnSurfaceVariantDark.copy(alpha = 0.7f),
+                        fontSize = 9.sp,
+                        color = if (isFocused) Color.White.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.45f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -855,9 +1002,9 @@ private fun PreviewPanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(Color.Black)
-                .border(1.dp, SurfaceCard, RoundedCornerShape(12.dp)),
+                .border(0.5.dp, SurfaceCard.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center
         ) {
             if (activeChannel != null) {
@@ -929,28 +1076,28 @@ private fun PreviewPanel(
                                 containerColor = if (isFavorite) RedLive else SurfaceCard,
                                 focusedContainerColor = SurfaceCardHover
                             ),
-                            shape = CardDefaults.shape(shape = RoundedCornerShape(8.dp)),
+                            shape = CardDefaults.shape(shape = RoundedCornerShape(6.dp)),
                             border = CardDefaults.border(
                                 focusedBorder = Border(
                                     border = BorderStroke(1.dp, FocusBorder),
-                                    shape = RoundedCornerShape(8.dp)
+                                    shape = RoundedCornerShape(6.dp)
                                 )
                             )
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
                                     imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                                     contentDescription = null,
                                     tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = if (isFavorite) "Quitar de Favoritos" else "Agregar a Favoritos",
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                     color = Color.White,
                                     fontWeight = FontWeight.Medium
                                 )
