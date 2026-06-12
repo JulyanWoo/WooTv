@@ -35,6 +35,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -99,6 +102,7 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
 
 @UnstableApi
+@kotlin.OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun HomeScreen(
     onChannelClick: (Long) -> Unit,
@@ -233,7 +237,14 @@ fun HomeScreen(
     // Auto-play first channel when channels load or change category/playlist
     LaunchedEffect(channels) {
         if (channels.isNotEmpty()) {
-            focusedChannel = channels.first()
+            // Only auto-focus first channel if the previously focused channel is no longer in the list (indicates category/playlist switch)
+            val currentFocused = focusedChannel
+            val matchingChannel = channels.find { it.id == currentFocused?.id }
+            if (matchingChannel != null) {
+                focusedChannel = matchingChannel
+            } else {
+                focusedChannel = channels.first()
+            }
         } else {
             focusedChannel = null
         }
@@ -245,22 +256,33 @@ fun HomeScreen(
             activePlaybackChannel = null
             return@LaunchedEffect
         }
-        kotlinx.coroutines.delay(400)
-        activePlaybackChannel = focusedChannel
+        if (focusedChannel?.id == activePlaybackChannel?.id) {
+            // Channel is the same (e.g. favorite status updated), update immediately without delay
+            activePlaybackChannel = focusedChannel
+        } else {
+            // New channel focused, apply debounce delay to avoid loading stream while fast-scrolling
+            kotlinx.coroutines.delay(400)
+            activePlaybackChannel = focusedChannel
+        }
     }
 
     // Play active channel
-    LaunchedEffect(activePlaybackChannel) {
-        activePlaybackChannel?.let { channel ->
+    LaunchedEffect(activePlaybackChannel?.id) {
+        val channel = activePlaybackChannel
+        if (channel != null) {
             try {
-                val mediaItem = MediaItem.fromUri(channel.streamUrl)
-                exoPlayer.setMediaItem(mediaItem)
-                exoPlayer.prepare()
-                exoPlayer.playWhenReady = true
+                val currentMediaItem = exoPlayer.currentMediaItem
+                val currentUri = currentMediaItem?.localConfiguration?.uri?.toString()
+                if (currentUri != channel.streamUrl) {
+                    val mediaItem = MediaItem.fromUri(channel.streamUrl)
+                    exoPlayer.setMediaItem(mediaItem)
+                    exoPlayer.prepare()
+                    exoPlayer.playWhenReady = true
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-        } ?: run {
+        } else {
             exoPlayer.stop()
             exoPlayer.clearMediaItems()
         }
@@ -765,6 +787,7 @@ private fun CategorySidebar(
     }
 }
 
+@kotlin.OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 private fun ChannelListPanel(
     channels: List<Channel>,
@@ -776,7 +799,19 @@ private fun ChannelListPanel(
     onChannelClick: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier = modifier) {
+    val focusRequesters = remember { mutableMapOf<Long, FocusRequester>() }
+    channels.forEach { channel ->
+        focusRequesters.getOrPut(channel.id) { FocusRequester() }
+    }
+
+    Column(
+        modifier = modifier
+            .focusProperties {
+                onEnter = {
+                    focusRequesters[focusedChannel?.id] ?: FocusRequester.Default
+                }
+            }
+    ) {
         // Channel count header
         Row(
             modifier = Modifier
@@ -845,13 +880,15 @@ private fun ChannelListPanel(
                 itemsIndexed(channels, key = { _, ch -> ch.id }) { index, channel ->
                     val isFocused = focusedChannel?.id == channel.id
                     val originalIndex = channelIndexMap[channel.id] ?: (index + 1)
+                    val itemFocusRequester = focusRequesters[channel.id] ?: remember { FocusRequester() }
                     ChannelListItem(
                         channel = channel,
                         index = originalIndex,
                         isFocused = isFocused,
                         playlistNameMap = playlistNameMap,
                         onFocus = { onFocusChannel(channel) },
-                        onClick = { onChannelClick(channel.id) }
+                        onClick = { onChannelClick(channel.id) },
+                        modifier = Modifier.focusRequester(itemFocusRequester)
                     )
                 }
             }
@@ -866,14 +903,15 @@ private fun ChannelListItem(
     isFocused: Boolean,
     playlistNameMap: Map<Long, String>,
     onFocus: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val bgColor = if (isFocused) SurfaceCardHover else Color.Transparent
     val logoUrl = channel.tvgLogo ?: channel.logoUrl
 
     Card(
         onClick = onClick,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .onFocusChanged { if (it.isFocused) onFocus() },
         colors = CardDefaults.colors(containerColor = bgColor),

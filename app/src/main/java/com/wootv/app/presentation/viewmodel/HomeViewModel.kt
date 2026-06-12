@@ -18,7 +18,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
 
 enum class MainCategory {
@@ -61,7 +63,7 @@ class HomeViewModel @Inject constructor(
 
     companion object {
         private val NoticiasKeywords = listOf(
-            "ntn24", "cablenoticias", "caracol internacional", "noticias rcn", "rcn", "citytv",
+            "ntn24", "cablenoticias", "caracol internacional", "caracol", "noticias rcn", "rcn", "citytv",
             "ecuavisa", "teleamazonas", "tc televisión", "tc television", "rtu", "rts",
             "foro tv", "milenio", "adn 40", "n+", "excelsior", "canal n", "rpp",
             "tv perú noticias", "tv peru noticias", "latina noticias", "atv+"
@@ -114,6 +116,7 @@ class HomeViewModel @Inject constructor(
                 .distinct()
                 .sortedWith(String.CASE_INSENSITIVE_ORDER)
         }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     val filteredChannels: StateFlow<List<Channel>> = combine(
@@ -250,7 +253,9 @@ class HomeViewModel @Inject constructor(
             name.contains("[co]", ignoreCase = true)
         }
         colombia + rest
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }
+    .flowOn(Dispatchers.Default)
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading
