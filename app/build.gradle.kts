@@ -6,6 +6,10 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+kotlin {
+    jvmToolchain(17)
+}
+
 android {
     namespace = "com.wootv.app"
     compileSdk = 35
@@ -36,6 +40,13 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            isReturnDefaultValues = true
+        }
     }
 }
 
@@ -69,5 +80,14 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.coroutines.android)
     implementation("io.coil-kt:coil-compose:2.7.0")
+
+    testImplementation(libs.junit)
+    testImplementation(libs.mockk)
+    testImplementation(libs.turbine)
+    testImplementation(libs.coroutines.test)
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.test.junit4)
+    testImplementation(libs.compose.test.manifest)
 }
 

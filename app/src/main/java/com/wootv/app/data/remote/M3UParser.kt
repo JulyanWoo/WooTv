@@ -1,6 +1,8 @@
 package com.wootv.app.data.remote
 
 import com.wootv.app.data.local.entity.ChannelEntity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -8,25 +10,36 @@ import javax.inject.Singleton
 @Singleton
 class M3UParser @Inject constructor() {
 
-    fun parse(file: File, playlistId: Long): List<ChannelEntity> {
+    companion object {
+        private val REGEX_CACHE: Map<String, Regex> = mapOf(
+            "tvg-id"      to Regex("""tvg-id\s*=\s*"([^"]*)""""),
+            "tvg-name"    to Regex("""tvg-name\s*=\s*"([^"]*)""""),
+            "tvg-logo"    to Regex("""tvg-logo\s*=\s*"([^"]*)""""),
+            "group-title" to Regex("""group-title\s*=\s*"([^"]*)""""),
+            "logo"        to Regex("""logo\s*=\s*"([^"]*)"""")
+        )
+    }
+
+    suspend fun parse(file: File, playlistId: Long): List<ChannelEntity> = withContext(Dispatchers.Default) {
         val channels = mutableListOf<ChannelEntity>()
-        val maxChannels = 1000 // Limit to 1000 channels to prevent memory issues
-        
+        // TODO(Phase 1): chunked Flow parsing para eliminar este cap y soportar listas 100k+
+        val maxChannels = 5000
+
         try {
             file.bufferedReader().use { reader ->
                 var currentLine: String? = reader.readLine()
                 var nextLine: String? = null
-                
+
                 while (currentLine != null && channels.size < maxChannels) {
                     val line = currentLine.trim()
-                    
+
                     if (line.startsWith("#EXTINF:")) {
                         try {
                             val metadata = parseExtInf(line)
                             nextLine = reader.readLine()
                             var streamUrl: String? = null
                             var extGroupTitle: String? = null
-                            
+
                             // Scan forward to find the actual stream URL
                             while (nextLine != null) {
                                 val nextLineTrimmed = nextLine.trim()
@@ -43,7 +56,7 @@ class M3UParser @Inject constructor() {
                                 }
                                 nextLine = reader.readLine()
                             }
-                            
+
                             if (streamUrl != null) {
                                 channels.add(
                                     ChannelEntity(
@@ -58,7 +71,7 @@ class M3UParser @Inject constructor() {
                                     )
                                 )
                             }
-                            
+
                             // If we found a URL, currentLine becomes nextLine, otherwise read next
                             if (streamUrl != null) {
                                 currentLine = nextLine
@@ -77,8 +90,8 @@ class M3UParser @Inject constructor() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        
-        return channels
+
+        channels
     }
 
     private data class ExtInfMetadata(
@@ -122,8 +135,6 @@ class M3UParser @Inject constructor() {
         )
     }
 
-    private fun extractAttribute(line: String, attribute: String): String? {
-        val regex = """$attribute\s*=\s*"([^"]*)"""".toRegex()
-        return regex.find(line)?.groupValues?.get(1)?.ifBlank { null }
-    }
+    private fun extractAttribute(line: String, attribute: String): String? =
+        REGEX_CACHE[attribute]?.find(line)?.groupValues?.get(1)?.ifBlank { null }
 }
